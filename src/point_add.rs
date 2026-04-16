@@ -1096,9 +1096,19 @@ fn mod_mul_horner_unadd_qq(
     p: U256,
 ) {
     let n = acc.len();
-    for i in 0..n {
-        cmod_sub_qq(b, acc, x, y[i], p);
-        if i < n - 1 { mod_halve_inplace_fast(b, acc, p); }
+    let is_squaring = x[0] == y[0];
+    if is_squaring {
+        for i in 0..n {
+            cmod_sub_qq(b, acc, x, y[i], p);
+            if i < n - 1 { mod_halve_inplace_fast(b, acc, p); }
+        }
+    } else {
+        mod_neg_inplace_fast(b, x, p);
+        for i in 0..n {
+            cmod_add_qq(b, acc, x, y[i], p);
+            if i < n - 1 { mod_halve_inplace_fast(b, acc, p); }
+        }
+        mod_neg_inplace_fast(b, x, p);
     }
 }
 
