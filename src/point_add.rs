@@ -1153,6 +1153,108 @@ fn mod_mul_horner_sub_qq(
     }
 }
 
+/// Schoolbook squarer with Bennett uncompute. For squaring `tmp_ext = x*x`
+/// (2n bits, no mod reduction), then sub from acc with on-the-fly Solinas
+/// reduction, then uncompute tmp_ext via gate-level inverse. Saves ~170k
+/// CCX vs walk-x squaring (459k → 289k) by avoiding 256 expensive
+/// cmod_add_qq calls (each 5n) in favor of 2n²=131k of cheap AND+Cuccaro.
+fn squaring_sub_from_acc_schoolbook(
+    b: &mut B,
+    acc: &[QubitId],
+    x: &[QubitId],
+    p: U256,
+) {
+    let n = acc.len();
+    debug_assert_eq!(n, 256);
+    debug_assert_eq!(x.len(), n);
+    let c = U256::MAX.wrapping_sub(p).wrapping_add(U256::from(1));
+
+    // Wide accumulator (2n bits) starts at 0.
+    let tmp_ext = b.alloc_qubits(2 * n);
+
+    // Phase 1: schoolbook tmp_ext = x*x.
+    schoolbook_square_into(b, x, &tmp_ext);
+
+    // Phase 2: subtract (lo + hi*c mod p) from acc.
+    // For each set bit k of c, sub (hi shifted by k mod p) from acc, by
+    // walking hi via mod_double in place. Sub lo first.
+    let lo: Vec<QubitId> = tmp_ext[0..n].to_vec();
+    let hi: Vec<QubitId> = tmp_ext[n..2*n].to_vec();
+    mod_sub_qq_fast(b, acc, &lo, p);
+    let max_set_bit: usize = 32; // c = 2^32 + 977
+    for k in 0..=max_set_bit {
+        if bit(c, k) {
+            mod_sub_qq_fast(b, acc, &hi, p);
+        }
+        if k < max_set_bit {
+            mod_double_inplace_fast(b, &hi, p);
+        }
+    }
+    // Walk hi back to original (max_set_bit halves).
+    for _ in 0..max_set_bit {
+        mod_halve_inplace_fast(b, &hi, p);
+    }
+
+    // Phase 3: uncompute tmp_ext via schoolbook inverse.
+    schoolbook_square_into_inverse(b, x, &tmp_ext);
+
+    b.free_vec(&tmp_ext);
+}
+
+/// Schoolbook: tmp_ext (2n bits) += x * x. Each row i adds (x[i] AND x)
+/// shifted by i, captured in n+1 bits to absorb carry into position i+n.
+fn schoolbook_square_into(b: &mut B, x: &[QubitId], tmp_ext: &[QubitId]) {
+    let n = x.len();
+    debug_assert_eq!(tmp_ext.len(), 2 * n);
+    for i in 0..n {
+        let row = b.alloc_qubits(n);
+        for k in 0..n {
+            b.ccx(x[i], x[k], row[k]);
+        }
+        let pad = b.alloc_qubit();
+        let mut row_padded = row.clone();
+        row_padded.push(pad);
+        let slice: Vec<QubitId> = tmp_ext[i..i+n+1].to_vec();
+        let c_in = b.alloc_qubit();
+        cuccaro_add_fast(b, &row_padded, &slice, c_in);
+        b.free(c_in);
+        b.free(pad);
+        // Unload row via measurement-based AND uncompute.
+        for k in 0..n {
+            let m = b.alloc_bit();
+            b.hmr(row[k], m);
+            b.cz_if(x[i], x[k], m);
+        }
+        b.free_vec(&row);
+    }
+}
+
+/// Gate-level inverse of schoolbook_square_into. Subtracts the same
+/// row contributions in reverse iteration order, returning tmp_ext to 0.
+fn schoolbook_square_into_inverse(b: &mut B, x: &[QubitId], tmp_ext: &[QubitId]) {
+    let n = x.len();
+    for i in (0..n).rev() {
+        let row = b.alloc_qubits(n);
+        for k in 0..n {
+            b.ccx(x[i], x[k], row[k]);
+        }
+        let pad = b.alloc_qubit();
+        let mut row_padded = row.clone();
+        row_padded.push(pad);
+        let slice: Vec<QubitId> = tmp_ext[i..i+n+1].to_vec();
+        let c_in = b.alloc_qubit();
+        cuccaro_sub_fast(b, &row_padded, &slice, c_in);
+        b.free(c_in);
+        b.free(pad);
+        for k in 0..n {
+            let m = b.alloc_bit();
+            b.hmr(row[k], m);
+            b.cz_if(x[i], x[k], m);
+        }
+        b.free_vec(&row);
+    }
+}
+
 fn mod_mul_sub_qq(
     b: &mut B,
     acc: &[QubitId],
@@ -1168,6 +1270,11 @@ fn mod_mul_sub_qq(
     let n = acc.len();
     let is_squaring = x[0] == y[0]; // same register → squaring
     if is_squaring {
+        // Use the schoolbook squarer for the squaring case (~170k savings).
+        squaring_sub_from_acc_schoolbook(b, acc, x, p);
+        return;
+    }
+    if false {
         // Hold the original x bits fixed for control while x itself walks
         // through (-x)*2^i mod p.
         let ctrl_copy = b.alloc_qubits(n);
