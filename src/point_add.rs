@@ -1063,15 +1063,27 @@ fn mod_mul_sub_qq(
     y: &[QubitId],
     p: U256,
 ) {
+    // acc -= x * y mod p. Implemented as: negate x, use mod_mul_ADD with
+    // (p-x), un-negate x. Saves 256 CCX per iteration (cmod_add is cheaper
+    // than cmod_sub: 1280 vs 1536 per call). The 4 mod_neg_inplace_fast
+    // calls cost 4 × 256 = 1024 CCX overhead, but 256 × 256 = 65536 savings
+    // from using add instead of sub → net ~64k savings per mul.
     let n = acc.len();
     let tmp = b.alloc_qubits(n);
+    // Copy negated x into tmp: negate x, copy, restore x.
+    mod_neg_inplace_fast(b, x, p);
     for i in 0..n { b.cx(x[i], tmp[i]); }
+    mod_neg_inplace_fast(b, x, p);
+    // Now tmp = p - x_orig. Schoolbook ADD loop (not sub).
     for i in 0..n {
-        cmod_sub_qq(b, acc, &tmp, y[i], p);
+        cmod_add_qq(b, acc, &tmp, y[i], p);
         if i < n - 1 { mod_double_inplace_fast(b, &tmp, p); }
     }
     for _ in 0..(n - 1) { mod_halve_inplace_fast(b, &tmp, p); }
+    // Uncopy: negate x, XOR into tmp, restore x.
+    mod_neg_inplace_fast(b, x, p);
     for i in 0..n { b.cx(x[i], tmp[i]); }
+    mod_neg_inplace_fast(b, x, p);
     b.free_vec(&tmp);
 }
 
