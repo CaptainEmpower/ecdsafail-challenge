@@ -174,3 +174,6 @@ timestamp	commit	toffoli	clifford	qubits	ops	correct	notes
 1776440065	a0b7de6	5726793.000	29969240.266	3360	42424197	OK	iter 6 end verify at 5726793
 1776440228	a0b7de6	5726793.000	29969240.266	3360	42424197	OK	iter 5 final at 5726793
 1776444759	8a642a9	5726783.000	29964262.891	3360	42409287	OK	shift22 reduction via sparse +c overflow
+1776444950	0c6235f	5731433.000	30021753.250	3372	42473917	FAIL	shift10 plus shift22 for Solinas walk | PHASE GARBAGE: global_phase = 0x504b7145b9cef989 across 64 live shots (must be 0)
+1776445580	0c6235f	5726783.000	29964092.422	3360	42409323	OK	phase-oracle flag uncompute in mod_add/sub_qq_fast
+1776445781	0c6235f	5726273.000	29963684.656	3360	42408267	OK	kaliski step4 zero-pad carry slot in small iters

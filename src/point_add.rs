@@ -2271,18 +2271,31 @@ fn kaliski_iteration(
         let v_w_sub_slice: Vec<QubitId> = v_w[0..load_width].to_vec();
         sub_nbit_qq_fast(b, &tmp_sub_slice, &v_w_sub_slice);
         // Transform tmp from "add_f AND u" to "add_f AND r".
-        // Small-iter: truncate to iter_idx+2 (r high bits 0).
+        // Small-iter: only the low iter+1 bits of r can be nonzero; the
+        // carry slot for s += r is handled by an explicit 0 pad instead of a
+        // useless extra CCX on a known-zero r bit.
         // Late-iter: full transform (r unbounded but u high bits 0 so CCX at
         // high bits effectively produces add_f AND r from tmp=0).
-        let transform_width = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+        let transform_width = if iter_idx + 1 < n { iter_idx + 1 } else { n };
         for i in 0..transform_width { b.cx(r[i], u[i]); }
         for i in 0..transform_width { b.ccx(add_f, u[i], tmp[i]); }
         for i in 0..transform_width { b.cx(r[i], u[i]); }
-        // Add s += tmp. Width = transform_width.
-        let add_width = transform_width;
-        let tmp_slice: Vec<QubitId> = tmp[0..add_width].to_vec();
+        // Add s += tmp. Small-iter still needs one extra carry slot above the
+        // live r bits, but that top input bit is known 0.
+        let add_width = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+        let mut tmp_slice: Vec<QubitId> = tmp[0..transform_width].to_vec();
+        let tmp_pad = if add_width > transform_width {
+            let q = b.alloc_qubit();
+            tmp_slice.push(q);
+            Some(q)
+        } else {
+            None
+        };
         let s_slice: Vec<QubitId> = s[0..add_width].to_vec();
         add_nbit_qq_fast(b, &tmp_slice, &s_slice);
+        if let Some(q) = tmp_pad {
+            b.free(q);
+        }
         // Unload: bits < transform_width have tmp = add_f AND r;
         // bits [transform_width..load_width) have tmp = add_f AND u (transform skipped, load done);
         // bits >= load_width have tmp = 0 (load skipped).
