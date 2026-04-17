@@ -134,3 +134,5 @@ timestamp	commit	toffoli	clifford	qubits	ops	correct	notes
 1776390017	e996391	7335056.000	37835151.625	3336	53859303	OK	session end: unconditional shift-right commit
 1776393300	c5bc7e8	7074956.000	35342635.078	3336	50976783	OK	no-corr mod_double for r when iter<255
 1776393797	7b77788	6945416.000	34241485.531	3336	49681383	OK	truncated add/sub in STEP 4 for small iter
+1776393894	46ddcfa	6685316.000	33721468.562	3336	48901083	OK	truncated STEP 3+9 (r,s) cswap for small iter
+1776394106	46ddcfa	6555266.000	33591938.672	3336	48641493	OK	transform trunc + load skip in STEP 4

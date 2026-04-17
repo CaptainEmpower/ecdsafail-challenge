@@ -2011,8 +2011,11 @@ fn kaliski_iteration(
     b.free(l_gt);
 
     // ─── STEP 3: with control(a): swap(u, v_w); swap(r, s) ───
+    // (r, s) truncated: at this point max(r,s) ≤ 2^iter_idx, so r[j]=s[j]=0
+    // for j >= iter_idx+1. Those cswaps are identity; skip them.
     for j in 0..n { cswap(b, a_f, u[j], v_w[j]); }
-    for j in 0..n { cswap(b, a_f, r[j], s[j]); }
+    let rs_width_step3 = if iter_idx + 1 < n { iter_idx + 1 } else { n };
+    for j in 0..rs_width_step3 { cswap(b, a_f, r[j], s[j]); }
 
     // ─── STEP 4 ───
     //   add ^= (f=1 AND b=0)
@@ -2030,23 +2033,29 @@ fn kaliski_iteration(
         for i in 0..n { b.ccx(add_f, u[i], tmp[i]); }
         sub_nbit_qq_fast(b, &tmp[..n], v_w);
         // Transform tmp from "add_f AND u" to "add_f AND r".
-        for i in 0..n { b.cx(r[i], u[i]); }
-        for i in 0..n { b.ccx(add_f, u[i], tmp[i]); }
-        for i in 0..n { b.cx(r[i], u[i]); }
-        // Cuccaro add on the live coefficient width.
-        // For iter_idx < 254, max(r,s) ≤ 2^iter_idx, so tmp (= add_f AND r)
-        // has high bits 0 and s has high bits 0. Sum ≤ 2^{iter_idx+1} fits
-        // in iter_idx+2 bits. Use truncated add — saves (n - iter_idx - 2) CCX.
-        let add_width = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+        // Truncated: for i >= iter_idx+2, r[i]=0 so the ccx effectively zeroes
+        // tmp[i] anyway (flips by add_f AND u[i], canceling load). By skipping,
+        // tmp[i] stays at add_f AND u[i] — which is fine since the subsequent
+        // truncated add doesn't touch those bits. Unload uses correct phase.
+        let transform_width = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+        for i in 0..transform_width { b.cx(r[i], u[i]); }
+        for i in 0..transform_width { b.ccx(add_f, u[i], tmp[i]); }
+        for i in 0..transform_width { b.cx(r[i], u[i]); }
+        // Cuccaro add: sum s+tmp ≤ 2^{iter_idx+1} fits in iter_idx+2 bits.
+        let add_width = transform_width;
         let tmp_slice: Vec<QubitId> = tmp[0..add_width].to_vec();
         let s_slice: Vec<QubitId> = s[0..add_width].to_vec();
         add_nbit_qq_fast(b, &tmp_slice, &s_slice);
-        // Unload tmp via measurement-based AND uncompute (0 Toffoli).
-        // tmp[i] = add_f AND r[i], unchanged by Cuccaro add (addend preserved).
+        // Unload tmp via measurement. Bits < transform_width: tmp = add_f AND r.
+        // Bits >= transform_width: tmp = add_f AND u (transform skipped).
         for i in 0..n {
             let m = b.alloc_bit();
             b.hmr(tmp[i], m);
-            b.cz_if(add_f, r[i], m);
+            if i < transform_width {
+                b.cz_if(add_f, r[i], m);
+            } else {
+                b.cz_if(add_f, u[i], m);
+            }
         }
         b.free_vec(&tmp);
     }
@@ -2081,8 +2090,11 @@ fn kaliski_iteration(
     }
 
     // ─── STEP 9: with control(a): swap(u, v_w); swap(r, s) (again) ───
+    // (r, s) truncated: after STEP 4 s ≤ 2^{iter_idx+1} and after STEP 7+8
+    // r ≤ 2^{iter_idx+1}, so r[j]=s[j]=0 for j >= iter_idx+2. Skip those.
     for j in 0..n { cswap(b, a_f, u[j], v_w[j]); }
-    for j in 0..n { cswap(b, a_f, r[j], s[j]); }
+    let rs_width_step9 = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+    for j in 0..rs_width_step9 { cswap(b, a_f, r[j], s[j]); }
 
     // ─── STEP 10: uncompute a via `a ^= NOT s[0]` ───
     // After STEP 9's swap, the invariant (from qrisp) is that
@@ -2328,7 +2340,9 @@ fn kaliski_iteration_backward(
     b.x(s[0]);
 
     // ── Reverse STEP 9 ─────────────────────────────────────────────────
-    for j in (0..n).rev() { cswap(b, a_f, r[j], s[j]); }
+    // Truncated (r,s) cswap matching forward STEP 9.
+    let rs_width_step9 = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+    for j in (0..rs_width_step9).rev() { cswap(b, a_f, r[j], s[j]); }
     for j in (0..n).rev() { cswap(b, a_f, u[j], v_w[j]); }
 
     // ── Reverse STEP 8 + 7 ─────────────────────────────────────────────
@@ -2352,10 +2366,11 @@ fn kaliski_iteration_backward(
     // ── Reverse STEP 4 (with measurement uncompute for unload) ─────────
     {
         let tmp = b.alloc_qubits(n);
-        // Load tmp = AND(add_f, r) for the reversed add
-        for i in 0..n { b.ccx(add_f, r[i], tmp[i]); }
-        // Reversed (F): sub_nbit_qq_fast(tmp, s) — truncated for small iter.
-        // Symmetric to forward's truncated add.
+        // Load tmp = AND(add_f, r). Truncated: for i >= iter_idx+1, r[i]=0,
+        // so CCX is no-op. Skip to save (n-iter_idx-1) CCXs.
+        let load_width = if iter_idx + 1 < n { iter_idx + 1 } else { n };
+        for i in 0..load_width { b.ccx(add_f, r[i], tmp[i]); }
+        // Reversed (F): sub_nbit_qq_fast(tmp, s) — truncated.
         let sub_width = if iter_idx + 2 < n { iter_idx + 2 } else { n };
         let tmp_slice: Vec<QubitId> = tmp[0..sub_width].to_vec();
         let s_slice: Vec<QubitId> = s[0..sub_width].to_vec();
@@ -2384,7 +2399,9 @@ fn kaliski_iteration_backward(
     b.x(b_f);
 
     // ── Reverse STEP 3 ─────────────────────────────────────────────────
-    for j in (0..n).rev() { cswap(b, a_f, r[j], s[j]); }
+    // Truncated (r,s) cswap matching forward STEP 3.
+    let rs_width_step3 = if iter_idx + 1 < n { iter_idx + 1 } else { n };
+    for j in (0..rs_width_step3).rev() { cswap(b, a_f, r[j], s[j]); }
     for j in (0..n).rev() { cswap(b, a_f, u[j], v_w[j]); }
 
     // ── Reverse STEP 2 (with_gt body is self-inverse) ──────────────────
