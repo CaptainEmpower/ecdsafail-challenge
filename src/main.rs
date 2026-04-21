@@ -43,7 +43,7 @@ fn secp256k1() -> WeierstrassEllipticCurve {
 
 // ─── Test runner ───────────────────────────────────────────────────────────
 
-const NUM_TESTS: usize = 4096;
+const NUM_TESTS: usize = 9024;
 
 /// Hash the circuit's op stream into the seed XOF (Fiat-Shamir).
 ///
@@ -54,10 +54,8 @@ const NUM_TESTS: usize = 4096;
 /// hasher directly. Any two distinct op streams produce distinct seeds
 /// (we hash the count + every field of every op).
 fn fiat_shamir_seed(ops: &[Op]) -> sha3::Shake256Reader {
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
     let mut hasher = Shake256::default();
     hasher.update(b"quantum_ecc-fiat-shamir-v1");
-    hasher.update(&now.to_le_bytes());
     hasher.update(&(ops.len() as u64).to_le_bytes());
     for op in ops {
         hasher.update(&[op.kind as u8]);
