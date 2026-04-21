@@ -3542,13 +3542,24 @@ fn with_kal_inv_raw<F: FnOnce(&mut B, &[QubitId])>(
     body: F,
 ) {
     let n = v_in.len();
-    let st = alloc_kaliski_state(b, n, iters);
+    let mut st = alloc_kaliski_state(b, n, iters);
 
     // Forward kaliski. st.r[..n] holds raw = v_in^{-1} * 2^(2n) mod p.
     kaliski_forward(b, v_in, &st, p, iters);
 
+    // Kaliski invariant at end of forward (for nonzero v_in):
+    //   u = 1, v_w = 0, f = 0, s = some, r = raw inverse.
+    // v_w is at all-zero — free its qubits during body (the peak window),
+    // then re-allocate before backward. Saves n qubits at peak with 0
+    // Toffoli cost.
+    b.free_vec(&st.v_w);
+
     let r_low: Vec<QubitId> = st.r[..n].to_vec();
     body(b, &r_low);
+
+    // Re-alloc v_w at |0> for the backward pass.
+    st.v_w = b.alloc_qubits(n);
+
     // Explicit backward pass (uses measurement-based uncompute, saves
     // ~511 CCX per iteration vs the emit_inverse version).
     kaliski_backward(b, v_in, &st, p, iters);
