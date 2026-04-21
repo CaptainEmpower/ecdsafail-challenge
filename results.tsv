@@ -224,3 +224,5 @@ timestamp	commit	toffoli	clifford	qubits	ops	correct	notes
 1776792215	63a0bff	87903.484	551494.303	4894	47529650	FAIL	diag | PHASE GARBAGE: global_phase = 0x9d66e18d29bb18e3 across 64 live shots (must be 0)
 1776792606	63a0bff	4306887.000	24086279.753	3614	34255151	OK	Litinski addsub inside 2-level Karatsuba middle mul 
 1776792616	63a0bff	4306887.000	24086294.101	3614	34255151	OK	autoresearch-checks
+1776797746	855f5da	4306887.000	24086277.890	3614	34255151	OK	baseline for qubit-reduction session (post Toffoli optimizations) 
+1776797756	855f5da	4306887.000	24086282.729	3614	34255151	OK	autoresearch-checks
