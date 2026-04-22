@@ -1,0 +1,339 @@
+//! Small main-circuit prototype for the hybrid Kaliski-jump moonshot.
+//!
+//! This does **not** attempt a full hybrid selector. Instead, it answers a
+//! narrower profiling question inside the actual point-add builder framework:
+//!
+//! > If the 3-step bulk prefix were already known exactly, how much cheaper is
+//! > a branch-free fused implementation than three ordinary `kaliski_iteration`s?
+//!
+//! This is the right lower-bound prototype after the window decomposition work:
+//! - 99%+ of windows are full 4-step windows,
+//! - `(u_low, v_low, cmp0, cmp1, cmp2)` determines the full-window 3-step
+//!   prefix exactly,
+//! - and the remaining ambiguity is almost entirely just the final UG/VG bit.
+//!
+//! So the leading prototype target is now:
+//!   exact 3-step bulk core + 1 ordinary residual step + tiny tail fallback.
+//!
+//! This file profiles the exact 3-step bulk core using the real gate builder
+//! and the real arithmetic primitives from `src/point_add/mod.rs`.
+
+use std::collections::BTreeMap;
+
+use super::{
+    add_nbit_qq_fast, kaliski_iteration, mod_double_no_corr, sub_nbit_qq_fast, with_gt, B,
+    N, OperationType, SECP256K1_P,
+};
+use super::kaliski_jump::{KCase, Sampler, observe_window};
+use super::test_timeout::{check_deadline, two_min_deadline};
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProtoCost {
+    pub ccx: u64,
+    pub cliff: u64,
+    pub other: u64,
+    pub ops: usize,
+    pub peak_qubits: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct PrefixCostRow {
+    pub prefix: [KCase; 3],
+    pub windows: usize,
+    pub exact3: ProtoCost,
+}
+
+#[derive(Debug, Clone)]
+pub struct HybridProtoSummary {
+    pub full_windows: usize,
+    pub distinct_prefixes: usize,
+
+    pub baseline3: ProtoCost,
+    pub baseline4: ProtoCost,
+    pub baseline_step3: ProtoCost,
+
+    pub weighted_exact3_ccx: f64,
+    pub weighted_exact3_cliff: f64,
+    pub min_exact3_ccx: u64,
+    pub max_exact3_ccx: u64,
+
+    pub weighted_hybrid4_lower_bound_ccx: f64,
+    pub weighted_hybrid4_lower_bound_cliff: f64,
+    pub lower_bound_ccx_savings_vs_baseline4: f64,
+    pub lower_bound_ccx_savings_pct_vs_baseline4: f64,
+
+    pub gt_compare: ProtoCost,
+    pub naive_three_cmp_ccx: u64,
+    pub naive_three_cmp_cliff: u64,
+    pub weighted_hybrid4_naive_3cmp_ccx: f64,
+    pub weighted_hybrid4_naive_3cmp_cliff: f64,
+    pub naive_3cmp_ccx_savings_vs_baseline4: f64,
+    pub naive_3cmp_ccx_savings_pct_vs_baseline4: f64,
+
+    pub top_prefix_rows: Vec<PrefixCostRow>,
+}
+
+fn summarize_builder(b: &B) -> ProtoCost {
+    let mut out = ProtoCost::default();
+    out.ops = b.ops.len();
+    out.peak_qubits = b.peak_qubits;
+    for op in &b.ops {
+        match op.kind {
+            OperationType::CCX | OperationType::CCZ => out.ccx += 1,
+            OperationType::CX
+            | OperationType::CZ
+            | OperationType::Swap
+            | OperationType::Hmr
+            | OperationType::R => out.cliff += 1,
+            _ => out.other += 1,
+        }
+    }
+    out
+}
+
+fn shift_right_known_even(b: &mut B, v: &[super::QubitId]) {
+    for i in 0..(v.len() - 1) {
+        b.swap(v[i], v[i + 1]);
+    }
+}
+
+fn prefix_to_string(prefix: [KCase; 3]) -> String {
+    let mut s = String::new();
+    for (i, kc) in prefix.into_iter().enumerate() {
+        if i > 0 { s.push('-'); }
+        s.push_str(match kc {
+            KCase::UEven => "UE",
+            KCase::VEven => "VE",
+            KCase::UGtV => "UG",
+            KCase::VGtU => "VG",
+        });
+    }
+    s
+}
+
+/// Branch-free realization of a *known* Kaliski case, intended only as a
+/// lower-bound prototype for profiling. This is not yet a full reversible
+/// hybrid primitive: there is no selector, no cleanup, and no tail handling.
+fn exact_known_case_step(
+    b: &mut B,
+    u: &[super::QubitId],
+    v: &[super::QubitId],
+    r: &[super::QubitId],
+    s: &[super::QubitId],
+    iter_idx: usize,
+    kc: KCase,
+) {
+    let rs_add_width = (iter_idx + 2).min(N);
+    match kc {
+        KCase::UEven => {
+            // (u, v) -> (u/2, v), (r, s) -> (r, 2s)
+            shift_right_known_even(b, u);
+            mod_double_no_corr(b, s);
+        }
+        KCase::VEven => {
+            // (u, v) -> (u, v/2), (r, s) -> (2r, s)
+            shift_right_known_even(b, v);
+            mod_double_no_corr(b, r);
+        }
+        KCase::UGtV => {
+            // (u, v) -> ((u-v)/2, v), (r, s) -> (r+s, 2s)
+            sub_nbit_qq_fast(b, v, u);
+            shift_right_known_even(b, u);
+            let s_slice = s[..rs_add_width].to_vec();
+            let r_slice = r[..rs_add_width].to_vec();
+            add_nbit_qq_fast(b, &s_slice, &r_slice);
+            mod_double_no_corr(b, s);
+        }
+        KCase::VGtU => {
+            // (u, v) -> (u, (v-u)/2), (r, s) -> (2r, r+s)
+            sub_nbit_qq_fast(b, u, v);
+            shift_right_known_even(b, v);
+            let r_slice = r[..rs_add_width].to_vec();
+            let s_slice = s[..rs_add_width].to_vec();
+            add_nbit_qq_fast(b, &r_slice, &s_slice);
+            mod_double_no_corr(b, r);
+        }
+    }
+}
+
+fn profile_exact_prefix(prefix: [KCase; 3]) -> ProtoCost {
+    let mut b = B::new();
+    let u = b.alloc_qubits(N);
+    let v = b.alloc_qubits(N);
+    let r = b.alloc_qubits(N);
+    let s = b.alloc_qubits(N);
+    for (i, kc) in prefix.into_iter().enumerate() {
+        b.set_phase("hybrid_exact3_step");
+        exact_known_case_step(&mut b, &u, &v, &r, &s, i, kc);
+    }
+    summarize_builder(&b)
+}
+
+fn profile_baseline_iters(n_iters: usize) -> ProtoCost {
+    let mut b = B::new();
+    let u = b.alloc_qubits(N);
+    let v = b.alloc_qubits(N);
+    let r = b.alloc_qubits(N);
+    let s = b.alloc_qubits(N);
+    let m_hist = b.alloc_qubits(n_iters);
+    let f = b.alloc_qubit();
+    for i in 0..n_iters {
+        b.set_phase("hybrid_baseline_iter");
+        kaliski_iteration(&mut b, SECP256K1_P, &u, &v, &r, &s, m_hist[i], f, i);
+    }
+    summarize_builder(&b)
+}
+
+fn profile_single_baseline_iter(iter_idx: usize) -> ProtoCost {
+    let mut b = B::new();
+    let u = b.alloc_qubits(N);
+    let v = b.alloc_qubits(N);
+    let r = b.alloc_qubits(N);
+    let s = b.alloc_qubits(N);
+    let m = b.alloc_qubit();
+    let f = b.alloc_qubit();
+    b.set_phase("hybrid_baseline_iter");
+    kaliski_iteration(&mut b, SECP256K1_P, &u, &v, &r, &s, m, f, iter_idx);
+    summarize_builder(&b)
+}
+
+fn profile_gt_compare() -> ProtoCost {
+    let mut b = B::new();
+    let u = b.alloc_qubits(N);
+    let v = b.alloc_qubits(N);
+    let flag = b.alloc_qubit();
+    with_gt(&mut b, &u, &v, flag, |_b| {});
+    summarize_builder(&b)
+}
+
+fn collect_full_prefix_counts(seed: &[u8], n_inputs: usize, w: usize) -> BTreeMap<[KCase; 3], usize> {
+    let deadline = two_min_deadline();
+    let mut sampler = Sampler::new(seed, SECP256K1_P);
+    let mut out = BTreeMap::new();
+    for input_idx in 0..n_inputs {
+        if (input_idx & 31) == 0 { check_deadline(deadline, "kaliski_hybrid_proto::collect_full_prefix_counts"); }
+        let mut u = SECP256K1_P;
+        let mut v = sampler.next();
+        for _ in 0..742 {
+            if v.is_zero() { break; }
+            let (_u4, _v4, obs) = observe_window(u, v, w, 4);
+            if obs.cases.len() == 4 {
+                let prefix = [obs.cases[0], obs.cases[1], obs.cases[2]];
+                *out.entry(prefix).or_default() += 1;
+            }
+            let (u1, v1, _kc) = super::kaliski_jump::kaliski_step_uv(u, v);
+            u = u1;
+            v = v1;
+        }
+    }
+    out
+}
+
+pub fn profile_exact3_bulk_core(seed: &[u8], n_inputs: usize, w: usize) -> HybridProtoSummary {
+    let prefix_counts = collect_full_prefix_counts(seed, n_inputs, w);
+    let full_windows: usize = prefix_counts.values().sum();
+    let baseline3 = profile_baseline_iters(3);
+    let baseline4 = profile_baseline_iters(4);
+    let baseline_step3 = profile_single_baseline_iter(3);
+
+    let mut rows = Vec::new();
+    let mut weighted_exact3_ccx = 0.0;
+    let mut weighted_exact3_cliff = 0.0;
+    let mut min_exact3_ccx = u64::MAX;
+    let mut max_exact3_ccx = 0u64;
+
+    for (&prefix, &windows) in &prefix_counts {
+        let exact3 = profile_exact_prefix(prefix);
+        weighted_exact3_ccx += exact3.ccx as f64 * windows as f64;
+        weighted_exact3_cliff += exact3.cliff as f64 * windows as f64;
+        min_exact3_ccx = min_exact3_ccx.min(exact3.ccx);
+        max_exact3_ccx = max_exact3_ccx.max(exact3.ccx);
+        rows.push(PrefixCostRow { prefix, windows, exact3 });
+    }
+    weighted_exact3_ccx /= full_windows as f64;
+    weighted_exact3_cliff /= full_windows as f64;
+
+    let weighted_hybrid4_lower_bound_ccx = weighted_exact3_ccx + baseline_step3.ccx as f64;
+    let weighted_hybrid4_lower_bound_cliff = weighted_exact3_cliff + baseline_step3.cliff as f64;
+    let lower_bound_ccx_savings_vs_baseline4 = baseline4.ccx as f64 - weighted_hybrid4_lower_bound_ccx;
+    let lower_bound_ccx_savings_pct_vs_baseline4 = 100.0 * lower_bound_ccx_savings_vs_baseline4 / baseline4.ccx as f64;
+
+    let gt_compare = profile_gt_compare();
+    let naive_three_cmp_ccx = 3 * gt_compare.ccx;
+    let naive_three_cmp_cliff = 3 * gt_compare.cliff;
+    let weighted_hybrid4_naive_3cmp_ccx = weighted_hybrid4_lower_bound_ccx + naive_three_cmp_ccx as f64;
+    let weighted_hybrid4_naive_3cmp_cliff = weighted_hybrid4_lower_bound_cliff + naive_three_cmp_cliff as f64;
+    let naive_3cmp_ccx_savings_vs_baseline4 = baseline4.ccx as f64 - weighted_hybrid4_naive_3cmp_ccx;
+    let naive_3cmp_ccx_savings_pct_vs_baseline4 = 100.0 * naive_3cmp_ccx_savings_vs_baseline4 / baseline4.ccx as f64;
+
+    rows.sort_by(|a, b| b.windows.cmp(&a.windows).then_with(|| a.prefix.cmp(&b.prefix)));
+    rows.truncate(12);
+
+    HybridProtoSummary {
+        full_windows,
+        distinct_prefixes: prefix_counts.len(),
+        baseline3,
+        baseline4,
+        baseline_step3,
+        weighted_exact3_ccx,
+        weighted_exact3_cliff,
+        min_exact3_ccx,
+        max_exact3_ccx,
+        weighted_hybrid4_lower_bound_ccx,
+        weighted_hybrid4_lower_bound_cliff,
+        lower_bound_ccx_savings_vs_baseline4,
+        lower_bound_ccx_savings_pct_vs_baseline4,
+        gt_compare,
+        naive_three_cmp_ccx,
+        naive_three_cmp_cliff,
+        weighted_hybrid4_naive_3cmp_ccx,
+        weighted_hybrid4_naive_3cmp_cliff,
+        naive_3cmp_ccx_savings_vs_baseline4,
+        naive_3cmp_ccx_savings_pct_vs_baseline4,
+        top_prefix_rows: rows,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact3_bulk_core_profile() {
+        let s = profile_exact3_bulk_core(b"kaliski-hybrid-proto-seed-v1", 10_000, 8);
+        eprintln!("=== Hybrid exact-3 bulk-core prototype profile (w=8) ===");
+        eprintln!("full windows observed                  : {}", s.full_windows);
+        eprintln!("distinct full 3-step prefixes         : {}", s.distinct_prefixes);
+        eprintln!("baseline 3 iters                      : ccx={} cliff={} peak_qubits={}", s.baseline3.ccx, s.baseline3.cliff, s.baseline3.peak_qubits);
+        eprintln!("baseline 4 iters                      : ccx={} cliff={} peak_qubits={}", s.baseline4.ccx, s.baseline4.cliff, s.baseline4.peak_qubits);
+        eprintln!("baseline iter #3 only                 : ccx={} cliff={} peak_qubits={}", s.baseline_step3.ccx, s.baseline_step3.cliff, s.baseline_step3.peak_qubits);
+        eprintln!("weighted exact-3 core                 : ccx={:.1} cliff={:.1}", s.weighted_exact3_ccx, s.weighted_exact3_cliff);
+        eprintln!("exact-3 core ccx range                : min={} max={}", s.min_exact3_ccx, s.max_exact3_ccx);
+        eprintln!("hybrid 4-step lower bound (no selector): ccx={:.1} cliff={:.1}", s.weighted_hybrid4_lower_bound_ccx, s.weighted_hybrid4_lower_bound_cliff);
+        eprintln!("lower-bound ccx savings vs 4 iters    : {:.1} ({:.2}%)", s.lower_bound_ccx_savings_vs_baseline4, s.lower_bound_ccx_savings_pct_vs_baseline4);
+        eprintln!("one 256-bit gt comparator             : ccx={} cliff={} peak_qubits={}", s.gt_compare.ccx, s.gt_compare.cliff, s.gt_compare.peak_qubits);
+        eprintln!("naive 3-comparator frontend           : ccx={} cliff={}", s.naive_three_cmp_ccx, s.naive_three_cmp_cliff);
+        eprintln!("hybrid + naive 3cmp upper estimate    : ccx={:.1} cliff={:.1}", s.weighted_hybrid4_naive_3cmp_ccx, s.weighted_hybrid4_naive_3cmp_cliff);
+        eprintln!("naive-3cmp ccx savings vs 4 iters     : {:.1} ({:.2}%)", s.naive_3cmp_ccx_savings_vs_baseline4, s.naive_3cmp_ccx_savings_pct_vs_baseline4);
+        eprintln!("top full-window prefixes:");
+        for row in &s.top_prefix_rows {
+            eprintln!(
+                "  {:>8} windows : {:<11}  exact3_ccx={:<6} cliff={:<7} peak_q={}",
+                row.windows,
+                prefix_to_string(row.prefix),
+                row.exact3.ccx,
+                row.exact3.cliff,
+                row.exact3.peak_qubits,
+            );
+        }
+        eprintln!("========================================================");
+
+        assert_eq!(s.distinct_prefixes, 36);
+        assert!(s.full_windows > 3_500_000);
+        assert!(s.min_exact3_ccx < s.baseline3.ccx);
+        assert!(s.max_exact3_ccx < s.baseline3.ccx);
+        assert!(s.weighted_exact3_ccx < s.baseline3.ccx as f64);
+        assert!(s.weighted_hybrid4_lower_bound_ccx < s.baseline4.ccx as f64);
+        assert!(s.weighted_hybrid4_naive_3cmp_ccx < s.baseline4.ccx as f64);
+    }
+}

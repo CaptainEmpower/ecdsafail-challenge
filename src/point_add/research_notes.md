@@ -378,6 +378,94 @@ For `w = 8`:
 This now looks like the most actionable structural lead toward reducing the 81%
 inversion budget.
 
+## New strongest result: main-circuit prototype says the moonshot is numerically plausible
+
+I added `src/point_add/kaliski_hybrid_proto.rs`, which uses the **real point-add
+builder and arithmetic primitives** to profile a lower-bound hybrid prototype.
+
+This prototype does **not** implement the full selector. Instead, it asks a
+clean question inside the actual gate framework:
+
+> If the exact full-window 3-step prefix were already known, how expensive is a
+> branch-free fused realization compared to ordinary Kaliski iterations?
+
+### Measured builder costs
+Using the actual `B` builder and the real arithmetic primitives in
+`src/point_add/mod.rs`:
+
+| object | CCX | Clifford-ish | peak qubits |
+|---|---:|---:|---:|
+| baseline 3 Kaliski iterations | 4,647 | 23,199 | 1,543 |
+| baseline 4 Kaliski iterations | 6,204 | 30,962 | 1,544 |
+| baseline iteration #3 only | 1,557 | 7,763 | 1,541 |
+| weighted exact 3-step bulk core | **385.3** | **5,006.7** | ≤ 1,280 |
+
+Across the 36 exact full-window 3-step prefixes, the branch-free core ranges:
+- min CCX = **0** (`UE-UE-UE` / `VE-VE-VE` style all-shift prefixes)
+- max CCX = **771**
+
+### 4-step hybrid lower bound
+A concrete first hybrid design would be:
+- exact 3-step bulk core,
+- then 1 ordinary residual Kaliski step.
+
+Measured lower bound, still **without selector cost**:
+
+| object | CCX | Clifford-ish |
+|---|---:|---:|
+| baseline 4 iterations | 6,204 | 30,962 |
+| hybrid 3-step core + 1 ordinary step | **1,942.3** | **12,769.7** |
+| savings | **4,261.7 CCX** | |
+| savings % | **68.69%** | |
+
+This is the most important number in the project so far.
+
+### Naive comparator-front-end upper estimate
+To check whether the selector budget is remotely plausible, I also profiled a
+full 256-bit `u > v` comparator in the real builder.
+
+Measured cost of one 256-bit `gt` comparator:
+- **256 CCX**
+- **2,307** Clifford-ish ops
+- peak qubits **770**
+
+A deliberately naive front-end with **three full-width comparators** would cost:
+- **768 CCX**
+- **6,921** Clifford-ish ops
+
+Adding that naive 3-comparator front-end to the hybrid lower bound gives:
+
+| object | CCX |
+|---|---:|
+| baseline 4 iterations | 6,204 |
+| hybrid + naive 3 comparators | **2,710.3** |
+| savings | **3,493.7** |
+| savings % | **56.31%** |
+
+So even a **very conservative** comparator-only selector estimate still leaves
+an enormous gap versus ordinary Kaliski.
+
+### Point-add scale implication
+Using the current measured point-add baseline:
+- total = **4,394,546** Toffoli
+- Kaliski share ≈ **81%**
+
+The prototype implies rough point-add projections of:
+
+| model | projected total Toffoli |
+|---|---:|
+| ideal hybrid lower bound (no selector overhead) | **~1.95M** |
+| hybrid + naive 3-full-comparator front-end | **~2.39M** |
+
+Interpretation:
+- the **lower bound** already lands below Google’s lower SOTA band,
+- and even the deliberately naive comparator-front-end estimate still lands
+  comfortably inside the **2.1M–2.7M** target range.
+
+This is the first time the moonshot has crossed from “interesting classical
+compression phenomenon” into “numerically plausible route to the actual SOTA
+regime” using the real circuit builder.
+
 ## Proposed next sessions
 
 ### P1. Enumerate the exact 36 bulk 3-step classes
