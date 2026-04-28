@@ -4080,6 +4080,10 @@ fn coeff_channel_cadd(b: &mut B, p: U256, cr: &[QubitId], cs: &[QubitId], ctrl: 
     cmod_add_qq(b, cs, cr, ctrl, p);
 }
 
+fn coeff_channel_csub(b: &mut B, p: U256, cr: &[QubitId], cs: &[QubitId], ctrl: QubitId) {
+    cmod_sub_qq(b, cs, cr, ctrl, p);
+}
+
 fn coeff_channel_double(b: &mut B, p: U256, cr: &[QubitId]) {
     // The data coefficient is an arbitrary field element, not the bounded
     // qrisp inverse coefficient, so the early no-correction shift is invalid.
@@ -5540,6 +5544,53 @@ fn apply_coeff_channel_from_term_roll(
     b.free(active);
 }
 
+fn apply_coeff_channel_from_term_roll_inverse(
+    b: &mut B,
+    p: U256,
+    cr: &[QubitId],
+    cs: &[QubitId],
+    a_hist: &[QubitId],
+    m_hist: &[QubitId],
+    term_bits: &[QubitId],
+) {
+    assert_eq!(a_hist.len(), m_hist.len());
+    let active = b.alloc_qubit(); // active after the last forward iteration is 0.
+    for i in (0..a_hist.len()).rev() {
+        b.set_phase("br_roll_inv_coeff_cswap2");
+        coeff_channel_cswap(b, a_hist[i], cr, cs);
+        b.set_phase("br_roll_inv_coeff_halve");
+        mod_halve_inplace_fast(b, cr, p);
+
+        b.set_phase("br_roll_inv_coeff_sub");
+        let same = b.alloc_qubit();
+        b.x(same);
+        b.cx(a_hist[i], same);
+        b.cx(m_hist[i], same); // same = !(a xor m)
+        let sub_ctrl = b.alloc_qubit();
+        b.ccx(active, same, sub_ctrl);
+        coeff_channel_csub(b, p, cr, cs, sub_ctrl);
+        b.ccx(active, same, sub_ctrl);
+        b.free(sub_ctrl);
+        b.cx(m_hist[i], same);
+        b.cx(a_hist[i], same);
+        b.x(same);
+        b.free(same);
+
+        b.set_phase("br_roll_inv_coeff_cswap1");
+        coeff_channel_cswap(b, a_hist[i], cr, cs);
+
+        b.set_phase("br_roll_inv_term_update");
+        let eq_i = b.alloc_qubit();
+        with_eq_const_fast(b, term_bits, i, eq_i, |b| {
+            b.cx(eq_i, active);
+        });
+        b.free(eq_i);
+    }
+    // We have rewound the rolling flag to its pre-iteration-0 value, 1.
+    b.x(active);
+    b.free(active);
+}
+
 fn apply_coeff_channel_from_term_index(
     b: &mut B,
     p: U256,
@@ -5952,6 +6003,46 @@ fn kaliski_branch_record_backward_term(
             b.x(st.u[i]);
         }
     }
+}
+
+fn with_kal_branch_inv_raw_roll<F: FnOnce(&mut B, &[QubitId])>(
+    b: &mut B,
+    v_in: &[QubitId],
+    p: U256,
+    iters: usize,
+    body: F,
+) {
+    let n = v_in.len();
+    let mut st = alloc_kaliski_branch_state_no_add(b, n, iters);
+    let term_bits = b.alloc_qubits(9);
+    kaliski_branch_record_forward_term(b, v_in, &st, &term_bits, p, iters);
+
+    // Final denominator state is known when iters is beyond the convergence
+    // tail. Free it so coefficient replay carries only histories + inv coeffs.
+    b.x(st.u[0]);
+    b.free_vec(&st.u);
+    b.free_vec(&st.v_w);
+    b.free(st.f_flag);
+
+    let inv_raw = b.alloc_qubits(n);
+    let coeff_s = b.alloc_qubits(n);
+    b.x(coeff_s[0]);
+    apply_coeff_channel_from_term_roll(b, p, &inv_raw, &coeff_s, &st.a_hist, &st.m_hist, &term_bits);
+
+    body(b, &inv_raw);
+
+    apply_coeff_channel_from_term_roll_inverse(b, p, &inv_raw, &coeff_s, &st.a_hist, &st.m_hist, &term_bits);
+    b.x(coeff_s[0]);
+    b.free_vec(&coeff_s);
+    b.free_vec(&inv_raw);
+
+    st.u = b.alloc_qubits(n);
+    st.v_w = b.alloc_qubits(n);
+    st.f_flag = b.alloc_qubit();
+    b.x(st.u[0]);
+    kaliski_branch_record_backward_term(b, v_in, &st, &term_bits, p, iters);
+    b.free_vec(&term_bits);
+    free_kaliski_branch_state(b, st);
 }
 
 fn with_kal_branch_term_roll_tagged_div<F: FnOnce(&mut B)>(
@@ -6500,6 +6591,7 @@ fn build_standard_point_add(
     oy: &[BitId],
     p: U256,
 ) {
+    let pair2_branch_inv = std::env::var("KAL_PAIR2_BRANCH_INV_ROLL").ok().as_deref() == Some("1");
     let coeff_channel_div = std::env::var("KAL_TAGGED_DIV_COEFF_CHANNEL").ok().as_deref() == Some("1");
     let branch_hist_div = std::env::var("KAL_TAGGED_DIV_BRANCH_HIST").ok().as_deref() == Some("1");
     let branch_stream_div = std::env::var("KAL_TAGGED_DIV_BRANCH_STREAM").ok().as_deref() == Some("1");
@@ -6515,7 +6607,7 @@ fn build_standard_point_add(
     // The tagged validation paths change the op stream / Fiat-Shamir seed;
     // keep pair2 at the prior robust 404 setting to avoid conflating the
     // algebra probe with an iteration-threshold phase cliff.
-    let pair2_iters = if tagged_div_validate { 404 } else { 403 };
+    let pair2_iters = if tagged_div_validate || pair2_branch_inv { 404 } else { 403 };
     if tagged_div_validate {
         // Structural validation path for the 600-scratch DIV idea: seed the
         // numerator as dy+dx, so the Kaliski coefficient output is tagged by
@@ -6686,17 +6778,33 @@ fn build_standard_point_add(
     b.set_phase("mul3_between_pair");
     mod_mul_write_into_zero_acc_karatsuba2(b, &ty, &lam, &tx, p);
     b.set_phase("pair2_kaliski_forward");
-    with_kal_inv_raw(b, &tx, p, pair2_iters, |b, inv_raw| {
-        b.set_phase("pair2_double");
-        for _ in 0..pair2_iters {
-            mod_double_inplace_fast(b, &lam, p);
-        }
-        b.set_phase("pair2_mul");
-        mod_mul_add_into_acc_schoolbook(b, &lam, inv_raw, &ty, p);
-        b.set_phase("pair2_cleanup");
-        mod_sub_qb(b, &ty, &oy, p);
-        b.set_phase("pair2_kaliski_backward");
-    });
+    if pair2_branch_inv {
+        // Compact exact inversion scaffold for pair2: branch histories +
+        // coefficient replay compute inv_raw, then replay is reversed after
+        // lam cleanup. This targets qubit shape rather than Toffoli.
+        with_kal_branch_inv_raw_roll(b, &tx, p, pair2_iters, |b, inv_raw| {
+            b.set_phase("pair2_branch_inv_double");
+            for _ in 0..pair2_iters {
+                mod_double_inplace_fast(b, &lam, p);
+            }
+            b.set_phase("pair2_branch_inv_mul");
+            mod_mul_add_into_acc_schoolbook(b, &lam, inv_raw, &ty, p);
+            b.set_phase("pair2_branch_inv_cleanup");
+            mod_sub_qb(b, &ty, &oy, p);
+        });
+    } else {
+        with_kal_inv_raw(b, &tx, p, pair2_iters, |b, inv_raw| {
+            b.set_phase("pair2_double");
+            for _ in 0..pair2_iters {
+                mod_double_inplace_fast(b, &lam, p);
+            }
+            b.set_phase("pair2_mul");
+            mod_mul_add_into_acc_schoolbook(b, &lam, inv_raw, &ty, p);
+            b.set_phase("pair2_cleanup");
+            mod_sub_qb(b, &ty, &oy, p);
+            b.set_phase("pair2_kaliski_backward");
+        });
+    }
     mod_add_qb(b, &tx, &ox, p);
     b.free_vec(&lam);
 }

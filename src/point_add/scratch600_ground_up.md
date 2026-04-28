@@ -507,6 +507,25 @@ is still not SOTA: branch-history recording plus coefficient replay remains
 clear: the branch-DIV qubit shape is plausible, but history replay must be
 removed or fused with the point-add body.
 
+A follow-up tried to reuse the same branch-history idea as an exact compact
+inversion for pair2 cleanup:
+
+```text
+KAL_PAIR2_BRANCH_INV_ROLL=1 cargo run --release -- --note pair2-branch-inv-roll
+avg_toffoli = 5,957,442
+qubits      = 3,147
+classical/phase/ancilla failures = 0
+peak phase  = shift22/cmod-add inside coefficient replay
+```
+
+This is a useful invalidation. Computing `inv_raw` by branch-record +
+coefficient replay + inverse coefficient replay is both wider and much more
+expensive than the existing full Kaliski state. The extra live objects are
+`m_hist+a_hist+term_idx`, an explicit `(inv_raw, coeff_s)` pair, and the
+Solinas cmod-add transients during replay. Therefore **branch-history replay is
+not a general compact replacement for Kaliski inversion**; it only makes sense
+when the coefficient channel becomes the output and is not reversed.
+
 So these scaffolds prove clean reversible tagged DIV below 2800q, but not SOTA
 Toffoli. The remaining gap is to eliminate/compress branch histories without
 full replay and/or make the branch predicate self-cleaning.
