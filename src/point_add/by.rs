@@ -2836,6 +2836,142 @@ mod tests {
         best.map(|(_, u, h, v)| (u, h, v))
     }
 
+    #[derive(Clone, Copy, Debug)]
+    enum RowOp2ForTest {
+        Add { dst: usize, src: usize, k: i128 },
+        Swap,
+        Neg { row: usize },
+    }
+
+    fn apply_row_op_to_mat_for_test(m: &mut [[i128; 2]; 2], op: RowOp2ForTest) {
+        match op {
+            RowOp2ForTest::Add { dst, src, k } => {
+                for c in 0..2 {
+                    m[dst][c] += k * m[src][c];
+                }
+            }
+            RowOp2ForTest::Swap => m.swap(0, 1),
+            RowOp2ForTest::Neg { row } => {
+                for c in 0..2 {
+                    m[row][c] = -m[row][c];
+                }
+            }
+        }
+    }
+
+    fn inverse_row_op_for_test(op: RowOp2ForTest) -> RowOp2ForTest {
+        match op {
+            RowOp2ForTest::Add { dst, src, k } => RowOp2ForTest::Add { dst, src, k: -k },
+            RowOp2ForTest::Swap => RowOp2ForTest::Swap,
+            RowOp2ForTest::Neg { row } => RowOp2ForTest::Neg { row },
+        }
+    }
+
+    fn reduce_unimodular_to_identity_ops_for_test(mut m: [[i128; 2]; 2]) -> Vec<RowOp2ForTest> {
+        let det = mat2_det_i128(m);
+        assert!(det == 1 || det == -1, "not unimodular: {m:?}, det={det}");
+        let mut ops = Vec::new();
+        for _ in 0..256 {
+            let a = m[0][0];
+            let c = m[1][0];
+            if c == 0 {
+                break;
+            }
+            if a.abs() >= c.abs() {
+                let q = a / c;
+                assert_ne!(q, 0, "Euclid quotient unexpectedly zero for {m:?}");
+                let op = RowOp2ForTest::Add { dst: 0, src: 1, k: -q };
+                apply_row_op_to_mat_for_test(&mut m, op);
+                ops.push(op);
+            } else {
+                let op = RowOp2ForTest::Swap;
+                apply_row_op_to_mat_for_test(&mut m, op);
+                ops.push(op);
+            }
+        }
+        assert_eq!(m[1][0], 0, "Euclid reduction failed: {m:?}");
+        assert!(m[0][0] == 1 || m[0][0] == -1, "bad pivot after reduction: {m:?}");
+        if m[0][0] == -1 {
+            let op = RowOp2ForTest::Neg { row: 0 };
+            apply_row_op_to_mat_for_test(&mut m, op);
+            ops.push(op);
+        }
+        assert_eq!(m[0][0], 1);
+        let d = m[1][1];
+        assert!(d == 1 || d == -1, "bad lower diagonal after reduction: {m:?}");
+        if m[0][1] != 0 {
+            let k = -m[0][1] / d;
+            let op = RowOp2ForTest::Add { dst: 0, src: 1, k };
+            apply_row_op_to_mat_for_test(&mut m, op);
+            ops.push(op);
+        }
+        if m[1][1] == -1 {
+            let op = RowOp2ForTest::Neg { row: 1 };
+            apply_row_op_to_mat_for_test(&mut m, op);
+            ops.push(op);
+        }
+        assert_eq!(m, [[1, 0], [0, 1]], "did not reduce to identity");
+        ops
+    }
+
+    fn emit_mod_shear_small_coeff_for_test(
+        b: &mut super::super::B,
+        dst: &[super::super::QubitId],
+        src: &[super::super::QubitId],
+        k: i128,
+        p: U256,
+    ) {
+        if k == 0 {
+            return;
+        }
+        mod_mul_two_small_coeffs_acc_for_cost(b, src, k, dst, 0, dst, p);
+    }
+
+    fn emit_row_op_mod_for_test(
+        b: &mut super::super::B,
+        x0: &[super::super::QubitId],
+        x1: &[super::super::QubitId],
+        op: RowOp2ForTest,
+        p: U256,
+    ) {
+        match op {
+            RowOp2ForTest::Add { dst: 0, src: 1, k } => emit_mod_shear_small_coeff_for_test(b, x0, x1, k, p),
+            RowOp2ForTest::Add { dst: 1, src: 0, k } => emit_mod_shear_small_coeff_for_test(b, x1, x0, k, p),
+            RowOp2ForTest::Add { .. } => unreachable!("invalid 2-row op"),
+            RowOp2ForTest::Swap => {
+                for i in 0..x0.len() {
+                    b.swap(x0[i], x1[i]);
+                }
+            }
+            RowOp2ForTest::Neg { row: 0 } => super::super::mod_neg_inplace_fast(b, x0, p),
+            RowOp2ForTest::Neg { row: 1 } => super::super::mod_neg_inplace_fast(b, x1, p),
+            RowOp2ForTest::Neg { .. } => unreachable!("invalid 2-row op"),
+        }
+    }
+
+    fn emit_unimodular_matrix_mod_inplace_for_test(
+        b: &mut super::super::B,
+        m: [[i128; 2]; 2],
+        x0: &[super::super::QubitId],
+        x1: &[super::super::QubitId],
+        p: U256,
+    ) -> (usize, i128) {
+        let ops = reduce_unimodular_to_identity_ops_for_test(m);
+        let max_k = ops
+            .iter()
+            .filter_map(|op| match op {
+                RowOp2ForTest::Add { k, .. } => Some(k.abs()),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0);
+        let count = ops.len();
+        for op in ops.into_iter().rev().map(inverse_row_op_for_test) {
+            emit_row_op_mod_for_test(b, x0, x1, op, p);
+        }
+        (count, max_k)
+    }
+
     #[test]
     fn hermite_factorization_keeps_scaled_by_window_in_place_with_small_coefficients() {
         const W: usize = 16;
@@ -2874,6 +3010,137 @@ mod tests {
             "BY Hermite in-place factorization: p99_coeff={p99}, max_coeff={max_coeff}"
         );
         assert!(max_coeff <= (1i128 << W), "Hermite factors exceeded w-bit coefficient scale");
+    }
+
+    fn inv_pow2_mod_p_for_test(w: usize, p: U256) -> U256 {
+        let inv2 = (p.wrapping_add(U256::from(1u64))) >> 1usize;
+        let mut acc = U256::from(1u64);
+        for _ in 0..w {
+            acc = mulm(acc, inv2, p);
+        }
+        acc
+    }
+
+    fn emit_fixed_hermite_inplace_window_for_test(
+        b: &mut super::super::B,
+        pmat: TransitionMatrix,
+        x0: &[super::super::QubitId],
+        x1: &[super::super::QubitId],
+        p_mod: U256,
+    ) -> (usize, i128, i128) {
+        const W: usize = 16;
+        let p = [[pmat.m00, pmat.m01], [pmat.m10, pmat.m11]];
+        let (u, h, v) = hermite_scaled_window_factor_for_test(p).expect("Hermite factor");
+        assert_eq!(mat2_mul_i128(mat2_mul_i128(u, p), v), h);
+        let ui = mat2_inv_unimodular_for_test(u);
+        let vi = mat2_inv_unimodular_for_test(v);
+        let e = h[0][1];
+        let (v_ops, v_max_k) = emit_unimodular_matrix_mod_inplace_for_test(b, vi, x0, x1, p_mod);
+        emit_mod_shear_small_coeff_for_test(b, x0, x1, e, p_mod);
+        for _ in 0..W {
+            super::super::mod_halve_inplace_fast(b, x0, p_mod);
+        }
+        let (u_ops, u_max_k) = emit_unimodular_matrix_mod_inplace_for_test(b, ui, x0, x1, p_mod);
+        (v_ops + u_ops + 1, v_max_k.max(u_max_k).max(e.abs()), e)
+    }
+
+    #[test]
+    fn fixed_hermite_inplace_modular_window_matches_scaled_by_matrix() {
+        const W: usize = 16;
+        let p_mod = SECP256K1_P;
+        let pmat = jump_matrix_direct_lowword(W, W, 1, 1, 3).3;
+        assert_eq!((pmat.m00, pmat.m01, pmat.m10, pmat.m11), (-8192, 24576, -3, 1));
+        let p = [[pmat.m00, pmat.m01], [pmat.m10, pmat.m11]];
+        let (u, h, v) = hermite_scaled_window_factor_for_test(p).expect("Hermite factor");
+        assert_eq!(mat2_mul_i128(mat2_mul_i128(u, p), v), h);
+        let e = h[0][1];
+        assert_eq!(h[0][0], 1);
+        assert_eq!(h[1][0], 0);
+        assert_eq!(h[1][1], 1i128 << W);
+
+        let mut b = super::super::B::new();
+        let x0 = b.alloc_qubits(256);
+        let x1 = b.alloc_qubits(256);
+        let (factor_ops, max_shear, _) = emit_fixed_hermite_inplace_window_for_test(&mut b, pmat, &x0, &x1, p_mod);
+        let ccx = count_ccx(&b.ops);
+        let peak = b.peak_qubits;
+        let num_qubits = b.next_qubit as usize;
+        let num_bits = b.next_bit as usize;
+        let ops = b.ops;
+
+        let inv2w = inv_pow2_mod_p_for_test(W, p_mod);
+        let row_expected = |a: U256, c: U256, c0: i128, c1: i128| -> U256 {
+            let t0 = mulm(signed_i128_mod_p(c0, p_mod), a, p_mod);
+            let t1 = mulm(signed_i128_mod_p(c1, p_mod), c, p_mod);
+            mulm(addm(t0, t1, p_mod), inv2w, p_mod)
+        };
+        let mut sx = Sampler::new(b"by-hermite-inplace-x0-v1", p_mod);
+        let mut sy = Sampler::new(b"by-hermite-inplace-x1-v1", p_mod);
+        for _ in 0..32 {
+            let a = sx.next();
+            let c = sy.next();
+            let exp0 = row_expected(a, c, pmat.m00, pmat.m01);
+            let exp1 = row_expected(a, c, pmat.m10, pmat.m11);
+            let mut hasher = sha3::Shake128::default();
+            hasher.update(b"by-hermite-inplace-sim-v1");
+            let mut xof = hasher.finalize_xof();
+            let mut sim = crate::sim::Simulator::new(num_qubits, num_bits, &mut xof);
+            set_slice_u512_by(&mut sim, &x0, u256_to_u512_for_by_tests(a));
+            set_slice_u512_by(&mut sim, &x1, u256_to_u512_for_by_tests(c));
+            sim.apply(&ops);
+            assert_eq!(get_slice_u512_by(&sim, &x0), u256_to_u512_for_by_tests(exp0), "row0 mismatch");
+            assert_eq!(get_slice_u512_by(&sim, &x1), u256_to_u512_for_by_tests(exp1), "row1 mismatch");
+        }
+        eprintln!(
+            "BY fixed Hermite in-place modular window: ccx={ccx}, peak={peak}q, e={e}, factor_ops={factor_ops}, max_shear={max_shear}"
+        );
+        assert!(peak < 1_600, "in-place Hermite window lost scratch advantage");
+        assert!(ccx < 80_000, "fixed Hermite in-place sample window too costly");
+    }
+
+    #[test]
+    fn fixed_hermite_inplace_window_cost_distribution() {
+        const W: usize = 16;
+        let p_mod = SECP256K1_P;
+        let mut hasher = sha3::Shake128::default();
+        hasher.update(b"by-hermite-inplace-cost-dist-v1");
+        let mut reader = hasher.finalize_xof();
+        let mut buf = [0u8; 24];
+        let samples = 24usize;
+        let mut costs = Vec::with_capacity(samples);
+        let mut peaks = Vec::with_capacity(samples);
+        let mut shears = Vec::with_capacity(samples);
+        let mut ops_counts = Vec::with_capacity(samples);
+        for _ in 0..samples {
+            reader.read(&mut buf);
+            let f_low = (u64::from_le_bytes(buf[0..8].try_into().unwrap()) as i128) | 1;
+            let g_low = u64::from_le_bytes(buf[8..16].try_into().unwrap()) as i128;
+            let delta = (u64::from_le_bytes(buf[16..24].try_into().unwrap()) % 41) as i64 - 20;
+            let (_, _, _, pmat) = jump_matrix_direct_lowword(W, W, delta, f_low, g_low);
+            let mut b = super::super::B::new();
+            let x0 = b.alloc_qubits(256);
+            let x1 = b.alloc_qubits(256);
+            let (ops_count, max_shear, _) = emit_fixed_hermite_inplace_window_for_test(&mut b, pmat, &x0, &x1, p_mod);
+            costs.push(count_ccx(&b.ops));
+            peaks.push(b.peak_qubits as usize);
+            shears.push(max_shear);
+            ops_counts.push(ops_count);
+        }
+        costs.sort_unstable();
+        peaks.sort_unstable();
+        shears.sort_unstable();
+        ops_counts.sort_unstable();
+        let mean = costs.iter().sum::<usize>() as f64 / samples as f64;
+        let p90 = costs[samples * 90 / 100];
+        let max = costs[samples - 1];
+        let peak_max = peaks[samples - 1];
+        let approx35 = mean * 35.0;
+        eprintln!(
+            "BY Hermite in-place window cost distribution: mean_ccx={mean:.1}, p90={p90}, max={max}, approx35≈{approx35:.0}, max_peak={peak_max}q, max_shear={}, max_factor_ops={}",
+            shears[samples - 1], ops_counts[samples - 1]
+        );
+        assert!(peak_max < 1_600, "Hermite in-place distribution lost scratch advantage");
+        assert!(approx35 < 2_000_000.0, "naive fixed Hermite arithmetic is too costly to be SOTA-shaped");
     }
 
     fn branch_bits_for_lowword_window(w: usize, mut delta: i64, mut f: i128, mut g: i128) -> Vec<bool> {

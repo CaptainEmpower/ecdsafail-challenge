@@ -487,9 +487,24 @@ z0      -> (z0 + e*z1) / 2^16      // one batched Solinas shift
 
 This is the concrete route from the current double-buffer row replacement to a
 600-scratch implementation: no simultaneous old+new pair, only the two live DIV
-registers plus carry/shift/control workspace. The remaining hard part is that
-`U,V,e` depend on quantum branch bits; fixed-matrix arithmetic is cheap, but
-coherent selected-factor application must avoid generic variable-coefficient
+registers plus carry/shift/control workspace. `fixed_hermite_inplace_modular_window_matches_scaled_by_matrix`
+then builds the first actual fixed-window circuit for the sample signed matrix
+`[[-8192,24576],[-3,1]]`. It applies `V^-1`, one row shear by `e=21845`, 16
+exact modular halvings, and `U^-1`; 32 random basis states match
+`2^-16 P(x0,x1)` exactly. Cost/shape:
+
+```text
+sample fixed window: 34,489 CCX, peak 1,285q, factor_ops=10
+24-sample distribution: mean 33,715 CCX, p90 43,942, max 44,179
+35 windows (naive fixed factors): ≈1,180,034 CCX, peak 1,285q
+```
+
+This confirms the scratch breakthrough but also shows that naive Euclidean
+shear synthesis is more expensive than double-buffer fixed rows. It is still in
+SOTA range if it deletes a full inversion-sized object, but the next structural
+work is selected-factor synthesis and cheaper unimodular application, not local
+adder tuning. The remaining hard part is that `U,V,e` depend on quantum branch
+bits; coherent selected-factor application must avoid generic variable-coefficient
 multiplication.
 
 This reopens BY as a live SOTA-shaped route but with precise remaining
