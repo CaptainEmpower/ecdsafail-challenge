@@ -99,6 +99,16 @@ which is exactly another variable division.  The executable probe
 minimum degree `4`.  A single slope tag therefore does not provide a universal
 2n-bit accumulator representation for Google's windowed point-add circuit.
 
+The user's scratch budget tightens the coefficient-DIV story: only ~600 qubits
+are available above the two 256-bit input coordinates.  A folded one-pair
+Kaliski DIV already spends `u+r=512` scratch, leaving 88 bits for branch cleanup.
+`scratch600_sidecar_tag_bits_do_not_fix_kaliski_branch_recovery` gives a small
+independent coefficient sidecar the best possible chance and still finds exact
+toy branch recovery needs `n-1` sidecar bits (`n=8 -> 7`, with 4 bits leaving
+9500 conflicts).  Extrapolated to secp256k1, the sidecar wants ~255 bits, not
+88.  Thus a 600-scratch design cannot be "current Kaliski + small tag"; it needs
+a transform whose inverse branch is local without a field-sized side channel.
+
 ### Strategy C re-estimate at the current baseline
 
 Classically correct formula:

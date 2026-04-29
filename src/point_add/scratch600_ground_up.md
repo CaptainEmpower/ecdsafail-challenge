@@ -727,6 +727,29 @@ Therefore a self-cleaning DIV now needs:
 Acceptance of a crude local classifier is not enough: >50% per-step blows up.
 This is the next hard synthesis problem.
 
+The 600-scratch cap makes the naive "just add a small tag" rescue very tight.
+A one-pair Kaliski DIV folded into the input registers uses `tx` as `v` and
+`ty` as coefficient `s`, but still needs scratch `u` and coefficient `r`, i.e.
+`2n = 512` qubits.  Only `600-512=88` qubits remain for any branch-cleaning
+sidecar.  The executable test
+`scratch600_sidecar_tag_bits_do_not_fix_kaliski_branch_recovery` evolves an
+independent known coefficient column in parallel on exhaustive toy fields and
+reveals only its low sidecar bits.  Exact poststate branch recovery needs:
+
+```text
+n=4 -> 3 bits
+n=5 -> 4 bits
+n=6 -> 5 bits
+n=7 -> 6 bits
+n=8 -> 7 bits
+```
+
+At toy `n=8`, even 4 sidecar bits leave 9500 branch conflicts.  The trend is
+`n-1` bits, extrapolating to ~255 bits for secp256k1, far above the 88-bit
+slack.  So under 600 scratch, a Kaliski-like one coefficient pair plus a small
+tag is not enough; the update convention itself must become locally reversible
+or the history must be represented in a fundamentally different state.
+
 ## 11. Fast invalidation tasks still open
 
 1. **End-state branch predicate synthesis**: derive a reversible predicate for

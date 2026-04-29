@@ -580,6 +580,99 @@ struct ToyLinState {
     f: u8,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ToyLinStateWithSidecar {
+    u: u64,
+    v: u64,
+    r: u64,
+    s: u64,
+    tag_r: u64,
+    tag_s: u64,
+    f: u8,
+}
+
+fn toy_step_linear_canonical_with_sidecar(st: &mut ToyLinStateWithSidecar, p: u64) -> Branch {
+    let mut m = 0u8;
+    if st.f == 1 && st.v == 0 { m ^= 1; }
+    st.f ^= m;
+    let u0 = (st.u & 1) as u8;
+    let v0 = (st.v & 1) as u8;
+    let mut a = 0u8;
+    if st.f == 1 && u0 == 0 { a ^= 1; }
+    if st.f == 1 && u0 == 1 && v0 == 0 { m ^= 1; }
+    let b = a ^ m;
+    let gt = if st.u > st.v { 1u8 } else { 0u8 };
+    let delta = (st.f & gt) & (1 ^ b);
+    a ^= delta;
+    m ^= delta;
+    let br = Branch { a_swap: a == 1, add: (st.f & (1 ^ b)) == 1 };
+    if br.a_swap {
+        core::mem::swap(&mut st.u, &mut st.v);
+        core::mem::swap(&mut st.r, &mut st.s);
+        core::mem::swap(&mut st.tag_r, &mut st.tag_s);
+    }
+    if br.add {
+        assert!(st.v >= st.u);
+        st.v -= st.u;
+        st.s = (st.s + st.r) % p;
+        st.tag_s = (st.tag_s + st.tag_r) % p;
+    }
+    st.v >>= 1;
+    st.r = (2 * st.r) % p;
+    st.tag_r = (2 * st.tag_r) % p;
+    if br.a_swap {
+        core::mem::swap(&mut st.u, &mut st.v);
+        core::mem::swap(&mut st.r, &mut st.s);
+        core::mem::swap(&mut st.tag_r, &mut st.tag_s);
+    }
+    br
+}
+
+fn toy_sidecar_branch_conflicts(n: usize, p: u64, sidecar_bits: usize) -> (usize, usize, usize) {
+    use std::collections::BTreeMap;
+    type Key = (usize, u64, u64, u64, u64, u8, u64, u64);
+    let mask = if sidecar_bits >= 64 { u64::MAX } else { (1u64 << sidecar_bits) - 1 };
+    let mut seen: BTreeMap<Key, Branch> = BTreeMap::new();
+    let mut conflicts = 0usize;
+    let mut total = 0usize;
+    for x in 1..p {
+        for y in 0..p {
+            let tag = (x + y) % p;
+            if tag == 0 { continue; }
+            let mut st = ToyLinStateWithSidecar {
+                u: p,
+                v: x,
+                r: 0,
+                s: tag,
+                // Independent known coefficient column.  If a small sidecar
+                // could replace branch history, low bits of this evolving tag
+                // should disambiguate the poststate branch.
+                tag_r: 1,
+                tag_s: 0,
+                f: 1,
+            };
+            for iter in 0..(2 * n - 1) {
+                let br = toy_step_linear_canonical_with_sidecar(&mut st, p);
+                let key = (
+                    iter,
+                    st.u,
+                    st.v,
+                    st.r,
+                    st.s,
+                    st.f,
+                    st.tag_r & mask,
+                    st.tag_s & mask,
+                );
+                if let Some(prev) = seen.insert(key, br) {
+                    if prev != br { conflicts += 1; }
+                }
+                total += 1;
+            }
+        }
+    }
+    (conflicts, total, seen.len())
+}
+
 fn toy_step_linear_canonical(st: &mut ToyLinState, p: u64) -> Branch {
     let mut m = 0u8;
     if st.f == 1 && st.v == 0 { m ^= 1; }
@@ -611,6 +704,48 @@ fn toy_step_linear_canonical(st: &mut ToyLinState, p: u64) -> Branch {
         core::mem::swap(&mut st.r, &mut st.s);
     }
     br
+}
+
+#[test]
+fn scratch600_sidecar_tag_bits_do_not_fix_kaliski_branch_recovery() {
+    // A 600-scratch DIV over the two 256-bit input registers has a brutal
+    // accounting constraint.  Using tx as v and ty as the data coefficient s,
+    // a Kaliski-like one-pair DIV already needs scratch for u and r: 2n=512
+    // qubits.  Only 88 qubits remain for any branch-cleaning sidecar.  Could a
+    // tiny independent tag channel disambiguate each iteration's branch from
+    // the poststate, avoiding m_hist?  Exhaustive toy checks say no: even when
+    // we evolve a full known coefficient column in parallel and reveal only its
+    // low sidecar bits, the minimum exact disambiguating sidecar grows as n-1.
+    // This is not a proof for all transforms, but it kills the hoped-for
+    // "one coefficient pair + small tag" Kaliski layout under a 600q scratch cap.
+    let cases = [(4usize, 13u64, 3usize), (5, 31, 4), (6, 61, 5), (7, 127, 6), (8, 251, 7)];
+    let mut last_min = 0usize;
+    for &(n, p, expected_min) in &cases {
+        let mut min_bits = None;
+        for bits in 0..=n {
+            let (conflicts, total, states) = toy_sidecar_branch_conflicts(n, p, bits);
+            eprintln!(
+                "sidecar tag branch recovery: n={n}, p={p}, bits={bits}, conflicts={conflicts}, states={states}, total={total}"
+            );
+            if n == 8 && bits == 4 {
+                println!("METRIC scratch600_sidecar_conflicts_n8_b4={conflicts}");
+            }
+            if conflicts == 0 {
+                min_bits = Some(bits);
+                break;
+            }
+        }
+        let min_bits = min_bits.expect("full n-bit sidecar should disambiguate toy state");
+        if n == 8 {
+            println!("METRIC scratch600_sidecar_min_bits_n8={min_bits}");
+            println!("METRIC scratch600_bare_kaliski_div_scratch=512");
+            println!("METRIC scratch600_remaining_sidecar=88");
+            println!("METRIC scratch600_extrapolated_sidecar_need=255");
+        }
+        assert_eq!(min_bits, expected_min);
+        assert!(min_bits >= last_min);
+        last_min = min_bits;
+    }
 }
 
 #[test]
