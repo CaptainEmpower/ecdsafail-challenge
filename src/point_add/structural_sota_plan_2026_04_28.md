@@ -1070,6 +1070,22 @@ uses direct 576-step full-width denominator compute/uncompute. This confirms the
 hard boundary: **BY only has a SOTA chance if denominator generation becomes a
 selected/window/consumed update; product-clean replay itself is viable.**
 
+The first ground-up consumed-denominator idea was invalidated early in
+`consumed_denominator_window_branchless_recovery_is_exponentially_ambiguous`.
+If we try to consume the BY denominator and later recover/clear a 16-step
+branch window from the post-window denominator alone, the inverse relation is
+massively many-to-one. The tiny poststate `(delta,f,g)=(0,1,0)` has:
+
+```text
+depth 16 predecessor states/patterns = 589,824
+```
+
+So a branchless poststate cleanup cannot be the SOTA denominator solution. A
+surviving BY design must either carry compressed branch/pattern history, or
+consume pattern+q inside a reversible fixed-matrix window update with an
+explicit local inverse. This invalidates the tempting “no history, recover from
+consumed denominator” route before more point-add wiring.
+
 Again, this is not a performance result. It proves both Kaliski inverse-sized
 objects in the real affine point-add can be replaced by BY tagged-DIV/product
 objects and still satisfy the full exact checker.

@@ -1036,6 +1036,83 @@ mod tests {
         }
     }
 
+    fn divstep_i128_once_for_ambiguity(delta: i64, f: i128, g: i128) -> (i64, i128, i128, u8) {
+        let odd = (g & 1) != 0;
+        if delta > 0 && odd {
+            (1 - delta, g, (g - f) / 2, b'A')
+        } else if odd {
+            (1 + delta, f, (g + f) / 2, b'B')
+        } else {
+            (1 + delta, f, g / 2, b'C')
+        }
+    }
+
+    fn inverse_divstep_candidates_for_ambiguity(delta: i64, f: i128, g: i128) -> Vec<(i64, i128, i128, u8)> {
+        // Invert one BY denominator divstep from a poststate.  The point of the
+        // last-shot consumed-denominator idea was to avoid storing branch bits
+        // and later recover them from the consumed denominator state.  These are
+        // the three mathematically valid predecessor formulas.
+        let mut out = Vec::with_capacity(3);
+        let candidates = [
+            (delta - 1, f, 2 * g, b'C'),
+            (delta - 1, f, 2 * g - f, b'B'),
+            (1 - delta, f - 2 * g, f, b'A'),
+        ];
+        for &(d0, f0, g0, case) in &candidates {
+            if (f0 & 1) == 0 {
+                continue;
+            }
+            let valid = match case {
+                b'C' => (g0 & 1) == 0,
+                b'B' => (g0 & 1) != 0 && d0 <= 0,
+                b'A' => (g0 & 1) != 0 && d0 > 0,
+                _ => false,
+            };
+            if valid {
+                let (d1, f1, g1, got_case) = divstep_i128_once_for_ambiguity(d0, f0, g0);
+                assert_eq!((d1, f1, g1, got_case), (delta, f, g, case));
+                out.push((d0, f0, g0, case));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn consumed_denominator_window_branchless_recovery_is_exponentially_ambiguous() {
+        // Ground-up last-shot BY invalidation: if we try to consume the
+        // denominator state in-place and clear the window branch controls from
+        // the post-window denominator alone, the inverse relation is massively
+        // many-to-one.  Even the tiny poststate (delta,f,g)=(0,1,0) has more
+        // than half a million valid 16-step predecessor branch patterns.  Thus
+        // a SOTA BY denominator cannot be branchless-poststate cleanup; it must
+        // carry compressed history or consume q/pattern inside a reversible
+        // fixed-matrix update with an explicit local inverse.
+        let mut states: std::collections::BTreeMap<(i64, i128, i128), usize> = std::collections::BTreeMap::new();
+        states.insert((0, 1, 0), 1);
+        let mut totals = Vec::new();
+        for _depth in 1..=16 {
+            let mut next: std::collections::BTreeMap<(i64, i128, i128), usize> = std::collections::BTreeMap::new();
+            for (&(d, f, g), &count) in states.iter() {
+                for (d0, f0, g0, _case) in inverse_divstep_candidates_for_ambiguity(d, f, g) {
+                    assert!(d0.abs() < 64);
+                    assert!(f0.abs() < (1i128 << 32));
+                    assert!(g0.abs() < (1i128 << 32));
+                    *next.entry((d0, f0, g0)).or_insert(0) += count;
+                }
+            }
+            let total: usize = next.values().copied().sum();
+            totals.push(total);
+            states = next;
+        }
+        let total16 = *totals.last().unwrap();
+        eprintln!(
+            "BY consumed-denominator branchless poststate ambiguity: totals_by_depth={totals:?}, depth16_states={}, depth16_patterns={total16}",
+            states.len()
+        );
+        assert!(states.len() > 500_000, "poststate unexpectedly identifies most predecessor states");
+        assert!(total16 > 500_000, "poststate unexpectedly identifies most branch patterns");
+    }
+
     #[test]
     fn windowed_scaled_by_tagged_division_matches_microstep_algebra() {
         // Full classical model of the intended w=16 BY tagged-DIV route:
