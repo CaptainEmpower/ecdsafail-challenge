@@ -1625,8 +1625,11 @@ Forward-only coefficient-transform Kaliski also got a stronger exactness check.
 The earlier secp sample suggested full post-state `(u,v,r,s,f)` might recover
 branches, but `exhaustive_toy_full_poststate_does_not_recover_forward_branch`
 finds exact tagged-DIV collisions even when the reverse iteration index and full
-post-state are known (`n=4,5,6` conflicts `108,1200,5760`).  Direct
-regeneration from the preserved initial `x` is not cheap either:
+post-state are known (`n=4,5,6` conflicts `108,1200,5760`).  The approximate
+exception version is also not viable: `tagged_full_poststate_branch_ambiguity_is_not_a_rare_exception`
+finds ambiguous full-poststate occurrences at about 19%, 22%, 23%, 23%, and 24%
+for toy `n=4..8` with nonzero tag `s0=x+y`, so the ambiguity is not a tiny
+patchable tail.  Direct regeneration from the preserved initial `x` is not cheap either:
 `initial_x_to_branch_history_oracle_is_dense_on_toy_kaliski` sees branch-history
 parity as full-degree/near-half-density in `x` (`n=8: degree 8, density 116/256;
 `n=12: degree 11, density 1976/4096`).  `exact_branch_history_has_field_entropy_lower_bound`
@@ -1637,8 +1640,8 @@ combines this with the remaining layouts: r-as-output coefficient DIV has a
 768q scratch floor and second-channel DIV has a 1280q floor, before flags or
 adder workspace, versus Google's low-qubit allowance of 663q beyond `tx,ty`.
 So branch cleanup cannot simply inspect live post-state, use a tiny x-oracle,
-compress to ~64 bits, or fit exact coefficient-transform history into low-qubit;
-it needs a different invariant or a deliberate approximate exception argument.
+compress to ~64 bits, fit exact coefficient-transform history into low-qubit,
+or ignore a negligible poststate-collision tail; it needs a different invariant.
 
 Coefficient-transform refinement checked: a single Kaliski coefficient pair
 cannot both preserve `x` and expose `y/x` by just using a constant tag.  If

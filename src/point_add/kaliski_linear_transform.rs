@@ -652,6 +652,51 @@ fn exhaustive_toy_full_poststate_does_not_recover_forward_branch() {
 }
 
 #[test]
+fn tagged_full_poststate_branch_ambiguity_is_not_a_rare_exception() {
+    // The approximate escape hatch would be to ignore the branch-recovery
+    // collisions from `exhaustive_toy_full_poststate_does_not_recover_forward_branch`
+    // as a tiny exceptional set.  They are not tiny on exhaustive toy fields.
+    // With the nonzero tagged seed s0=x+y (excluding only y=-x), roughly a
+    // quarter of step occurrences land in post-states that admit more than one
+    // predecessor branch.  That is structural ambiguity, not a negligible
+    // exceptional tail that can be patched cheaply.
+    use std::collections::BTreeMap;
+    let cases = [(4usize, 13u64), (5, 31), (6, 61), (7, 127), (8, 251)];
+    for &(n, p) in &cases {
+        let mut seen: BTreeMap<ToyLinKey, [usize; 4]> = BTreeMap::new();
+        let mut total = 0usize;
+        for x in 1..p {
+            for y in 0..p {
+                let tag = (x + y) % p;
+                if tag == 0 { continue; }
+                let mut st = ToyLinState { u: p, v: x, r: 0, s: tag, f: 1 };
+                for iter in 0..(2 * n - 1) {
+                    let br = toy_step_linear_canonical(&mut st, p);
+                    let key = ToyLinKey { iter, u: st.u, v: st.v, r: st.r, s: st.s, f: st.f };
+                    let idx = (br.a_swap as usize) * 2 + (br.add as usize);
+                    seen.entry(key).or_insert([0; 4])[idx] += 1;
+                    total += 1;
+                }
+            }
+        }
+        let mut ambiguous_keys = 0usize;
+        let mut ambiguous_occurrences = 0usize;
+        for counts in seen.values() {
+            if counts.iter().filter(|&&c| c != 0).count() > 1 {
+                ambiguous_keys += 1;
+                ambiguous_occurrences += counts.iter().sum::<usize>();
+            }
+        }
+        let frac = ambiguous_occurrences as f64 / total as f64;
+        eprintln!(
+            "toy tagged full-poststate branch ambiguity: n={n}, p={p}, total={total}, states={}, ambiguous_keys={ambiguous_keys}, ambiguous_occurrences={ambiguous_occurrences}, frac={frac:.6}",
+            seen.len()
+        );
+        assert!(frac > 0.18, "branch ambiguity unexpectedly looked rare: frac={frac}");
+    }
+}
+
+#[test]
 fn bilinear_invariant_does_not_recover_inverse_branch() {
     // The obvious algebraic invariant of the coefficient transform is
     //     r*v + s*u = 0 (mod p)

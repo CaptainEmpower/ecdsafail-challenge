@@ -416,8 +416,21 @@ n=6 p=61 total=39600 states=21000 conflicts=5760
 ```
 
 So a forward-only self-cleaning Kaliski cannot simply uncompute each branch by
-looking at the live post-state.  It needs explicit history, a different state
-invariant, or an approximate exceptional-set argument.
+looking at the live post-state.  The approximate-exception version is also not
+credible: `tagged_full_poststate_branch_ambiguity_is_not_a_rare_exception`
+counts all ambiguous occurrences for the nonzero tagged seed `s0=x+y` and finds
+roughly a quarter of toy transitions ambiguous:
+
+```text
+n=4 p=13   ambiguous_occurrences=192/1008    frac=0.190476
+n=5 p=31   ambiguous_occurrences=1770/8100   frac=0.218519
+n=6 p=61   ambiguous_occurrences=9120/39600  frac=0.230303
+n=7 p=127  ambiguous_occurrences=47628/206388 frac=0.230769
+n=8 p=251  ambiguous_occurrences=228000/937500 frac=0.243200
+```
+
+This is not a negligible exceptional tail.  A self-cleaning Kaliski needs
+explicit history or a genuinely different state invariant.
 
 Recomputing branch history directly from the preserved initial `x` is also not
 a tiny oracle.  `initial_x_to_branch_history_oracle_is_dense_on_toy_kaliski`
