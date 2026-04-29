@@ -4785,8 +4785,8 @@ fn by_add_neg_quotient_from_centered_r_for_bench(
     let f_pos = b.alloc_qubit();
     b.x(f_pos);
     b.cx(f_neg, f_pos);
-    by_cmod_sub_qq_exact_for_bench(b, acc, &r_mod, f_pos, p);
-    by_cmod_add_qq_exact_for_bench(b, acc, &r_mod, f_neg, p);
+    cmod_sub_qq(b, acc, &r_mod, f_pos, p);
+    cmod_add_qq(b, acc, &r_mod, f_neg, p);
     b.cx(f_neg, f_pos);
     b.x(f_pos);
     b.free(f_pos);

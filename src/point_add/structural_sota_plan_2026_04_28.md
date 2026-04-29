@@ -956,15 +956,30 @@ emitted_ops = 51,930,771
 altseed/classical/phase/ancilla failures = 0
 ```
 
+A follow-up changed the quotient-add/copy into the live accumulator from exact
+controlled modular add/sub to the fast MBU versions; this stayed phase-clean and
+slightly reduced the replacement probes:
+
+```text
+BY_CENTERED_PAIR1_REPLACE=1
+avg_toffoli = 8,171,417
+
+BY_CENTERED_PAIR2_REPLACE=1
+avg_toffoli = 8,187,601
+```
+
 Both replacements can be enabled together and pass:
 
 ```text
 BY_CENTERED_PAIR1_REPLACE=1 BY_CENTERED_PAIR2_REPLACE=1
-avg_toffoli = 12,251,174
+avg_toffoli = 12,246,560
 qubits      = 5,589
-emitted_ops = 72,970,707
+emitted_ops = 72,997,701
 altseed/classical/phase/ancilla failures = 0
 ```
+
+Trying to also make the signed-to-modular copy's sign-controlled ±c correction
+MBU-fast failed with one phase-garbage batch, so that copy remains exact for now.
 
 Again, this is not a performance result. It proves both Kaliski inverse-sized
 objects in the real affine point-add can be replaced by centered BY tagged-DIV
