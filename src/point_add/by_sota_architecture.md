@@ -163,6 +163,11 @@ history.  The next blocker is circuit cost for:
 2. implementing the A-step ratio update `(h - 1)/(2h)` reversibly without a
    per-step variable inverse blow-up.
 
+`full_ratio_initial_constant_multiply_is_not_the_main_blocker` suggests item 1
+is acceptable: a naive shifted controlled-add constant multiply has summed add
+width 110,720, so a compute+uncompute round trip is roughly 221k--443k Toffoli
+under 1--2 Toffoli/bit add assumptions (`p^-1` has popcount 305 over 560 bits).
+
 `ratio_a_step_is_inverse_dense_and_common` records why item 2 is serious:
 for a toy 16-bit odd `h`, one high output bit of the A map has ANF degree 14 and
 7268 nonzero monomials out of 32768; real 560-step traces average about 132 A

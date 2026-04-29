@@ -2436,6 +2436,29 @@ mod tests {
     }
 
     #[test]
+    fn full_ratio_initial_constant_multiply_is_not_the_main_blocker() {
+        // h0 = x * p^-1 mod 2^560 is a rectangular constant multiply from a
+        // 256-bit input.  A naive controlled-add implementation needs one
+        // shifted 560-bit-ish add per x bit; this is large but still in the
+        // few-10^5 Toffoli range for compute+uncompute, unlike per-A variable
+        // inversions.
+        const TOTAL_BITS: usize = 35 * 16;
+        const X_BITS: usize = 256;
+        let p_big = big9_from_u256(SECP256K1_P);
+        let p_inv = big9_inv_odd_mod_pow2(&p_big, TOTAL_BITS);
+        let inv_pop = (0..TOTAL_BITS).filter(|&i| big9_bit(&p_inv, i)).count();
+        let add_widths: usize = (0..X_BITS).map(|i| TOTAL_BITS - i).sum();
+        let one_toffoli_per_bit_roundtrip = 2 * add_widths;
+        let two_toffoli_per_bit_roundtrip = 4 * add_widths;
+        eprintln!(
+            "BY full-ratio h0 constmul budget: p_inv_pop={inv_pop}, add_widths={add_widths}, roundtrip_1t={one_toffoli_per_bit_roundtrip}, roundtrip_2t={two_toffoli_per_bit_roundtrip}"
+        );
+        assert_eq!(add_widths, 110_720);
+        assert!(one_toffoli_per_bit_roundtrip < 250_000);
+        assert!(two_toffoli_per_bit_roundtrip < 500_000);
+    }
+
+    #[test]
     fn ratio_window_mobius_denominators_are_not_near_constant() {
         // Windowing the ratio update gives
         //   h' = (m10 + m11*h) / (m00 + m01*h)
