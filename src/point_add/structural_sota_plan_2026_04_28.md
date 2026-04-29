@@ -106,8 +106,14 @@ Kaliski DIV already spends `u+r=512` scratch, leaving 88 bits for branch cleanup
 independent coefficient sidecar the best possible chance and still finds exact
 toy branch recovery needs `n-1` sidecar bits (`n=8 -> 7`, with 4 bits leaving
 9500 conflicts).  Extrapolated to secp256k1, the sidecar wants ~255 bits, not
-88.  Thus a 600-scratch design cannot be "current Kaliski + small tag"; it needs
-a transform whose inverse branch is local without a field-sized side channel.
+88.  The companion test
+`unreduced_coefficient_kaliski_self_cleans_but_width_kills_scratch600` shows the
+other side of the tradeoff: if coefficient registers are not reduced modulo `p`,
+poststate branch recovery is exact on exhaustive toys, but coefficient width
+grows as `3n-1` (toy `n=8 -> 23`; secp ≈663-bit coefficients), implying about
+1326 scratch in the folded layout.  Thus a 600-scratch design cannot be
+"current Kaliski + small tag" or "unreduced Kaliski"; it needs a transform whose
+inverse branch is local without field-sized quotient side information.
 
 ### Strategy C re-estimate at the current baseline
 

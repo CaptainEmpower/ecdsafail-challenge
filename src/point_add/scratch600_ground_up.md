@@ -750,6 +750,26 @@ slack.  So under 600 scratch, a Kaliski-like one coefficient pair plus a small
 tag is not enough; the update convention itself must become locally reversible
 or the history must be represented in a fundamentally different state.
 
+The complementary toy check `unreduced_coefficient_kaliski_self_cleans_but_width_kills_scratch600`
+identifies where the history went.  If coefficient registers are **not** reduced
+modulo `p`, their high quotient bits make every poststate image disjoint:
+exhaustive toys have zero branch conflicts.  But the coefficient width grows as
+`n + iters = 3n-1` bits in the toy schedule (`n=8 -> 23` bits).  For secp256k1
+this means about `256+407=663`-bit coefficient registers.  Folded into the input
+layout, scratch would be roughly:
+
+```text
+u scratch                         256
+wide r coefficient scratch         663
+extension bits for input s=ty      407
+--------------------------------------
+                                  1326 scratch
+```
+
+So unreduced coefficients are a conceptual self-cleaning Kaliski, but not a
+600-scratch circuit.  Any successful 600-scratch DIV must somehow get the local
+reversibility of unreduced coefficients without paying their quotient-bit width.
+
 ## 11. Fast invalidation tasks still open
 
 1. **End-state branch predicate synthesis**: derive a reversible predicate for

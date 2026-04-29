@@ -628,6 +628,75 @@ fn toy_step_linear_canonical_with_sidecar(st: &mut ToyLinStateWithSidecar, p: u6
     br
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ToyUnreducedCoeffState {
+    u: u64,
+    v: u64,
+    r: u128,
+    s: u128,
+    f: u8,
+}
+
+fn toy_step_unreduced_coeff(st: &mut ToyUnreducedCoeffState) -> Branch {
+    let mut m = 0u8;
+    if st.f == 1 && st.v == 0 { m ^= 1; }
+    st.f ^= m;
+    let u0 = (st.u & 1) as u8;
+    let v0 = (st.v & 1) as u8;
+    let mut a = 0u8;
+    if st.f == 1 && u0 == 0 { a ^= 1; }
+    if st.f == 1 && u0 == 1 && v0 == 0 { m ^= 1; }
+    let b = a ^ m;
+    let gt = if st.u > st.v { 1u8 } else { 0u8 };
+    let delta = (st.f & gt) & (1 ^ b);
+    a ^= delta;
+    m ^= delta;
+    let br = Branch { a_swap: a == 1, add: (st.f & (1 ^ b)) == 1 };
+    if br.a_swap {
+        core::mem::swap(&mut st.u, &mut st.v);
+        core::mem::swap(&mut st.r, &mut st.s);
+    }
+    if br.add {
+        assert!(st.v >= st.u);
+        st.v -= st.u;
+        st.s += st.r;
+    }
+    st.v >>= 1;
+    st.r <<= 1;
+    if br.a_swap {
+        core::mem::swap(&mut st.u, &mut st.v);
+        core::mem::swap(&mut st.r, &mut st.s);
+    }
+    br
+}
+
+fn toy_unreduced_coeff_branch_stats(n: usize, p: u64) -> (usize, usize, usize, usize) {
+    use std::collections::BTreeMap;
+    type Key = (usize, u64, u64, u128, u128, u8);
+    let mut seen: BTreeMap<Key, Branch> = BTreeMap::new();
+    let mut conflicts = 0usize;
+    let mut total = 0usize;
+    let mut max_bits = 0usize;
+    for x in 1..p {
+        for y in 0..p {
+            let tag = (x + y) % p;
+            if tag == 0 { continue; }
+            let mut st = ToyUnreducedCoeffState { u: p, v: x, r: 0, s: tag as u128, f: 1 };
+            for iter in 0..(2 * n - 1) {
+                let br = toy_step_unreduced_coeff(&mut st);
+                max_bits = max_bits.max((128 - st.r.leading_zeros()) as usize);
+                max_bits = max_bits.max((128 - st.s.leading_zeros()) as usize);
+                let key = (iter, st.u, st.v, st.r, st.s, st.f);
+                if let Some(prev) = seen.insert(key, br) {
+                    if prev != br { conflicts += 1; }
+                }
+                total += 1;
+            }
+        }
+    }
+    (conflicts, total, seen.len(), max_bits)
+}
+
 fn toy_sidecar_branch_conflicts(n: usize, p: u64, sidecar_bits: usize) -> (usize, usize, usize) {
     use std::collections::BTreeMap;
     type Key = (usize, u64, u64, u64, u64, u8, u64, u64);
@@ -704,6 +773,34 @@ fn toy_step_linear_canonical(st: &mut ToyLinState, p: u64) -> Branch {
         core::mem::swap(&mut st.r, &mut st.s);
     }
     br
+}
+
+#[test]
+fn unreduced_coefficient_kaliski_self_cleans_but_width_kills_scratch600() {
+    // First-principles check: the branch ambiguity is created by modularly
+    // reducing the coefficient pair.  If we never reduce r,s modulo p, the high
+    // quotient bits retain enough information to make the full poststate images
+    // disjoint; no m_hist is needed on exhaustive toys.  But the price is that
+    // the coefficient registers grow by the iteration count.  With ~407 secp
+    // iterations, one data coefficient register would need about 256+407=663
+    // bits.  In a folded 600-scratch layout this means scratch u (256) + wide r
+    // (663) + extending input s by 407 bits = 1326 scratch, before carries.
+    // This is the cleanest way to see where the missing branch history went:
+    // it is sitting in the high quotient bits of unreduced coefficients.
+    let cases = [(4usize, 13u64), (5, 31), (6, 61), (7, 127), (8, 251)];
+    for &(n, p) in &cases {
+        let (conflicts, total, states, max_bits) = toy_unreduced_coeff_branch_stats(n, p);
+        eprintln!(
+            "unreduced coefficient branch recovery: n={n}, p={p}, conflicts={conflicts}, states={states}, total={total}, max_coeff_bits={max_bits}"
+        );
+        assert_eq!(conflicts, 0);
+        assert_eq!(max_bits, 3 * n - 1);
+        if n == 8 {
+            println!("METRIC unreduced_kaliski_max_coeff_bits_n8={max_bits}");
+            println!("METRIC scratch600_unreduced_coeff_bits_secp=663");
+            println!("METRIC scratch600_unreduced_scratch_floor=1326");
+        }
+    }
 }
 
 #[test]
