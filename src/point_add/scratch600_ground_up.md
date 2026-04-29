@@ -450,6 +450,20 @@ history, but it cannot become a ~64-bit or ~100-bit miracle.  History-only
 compression is not enough unless the rest of the Kaliski state is also
 fundamentally folded.
 
+`coefficient_transform_history_floor_misses_low_qubit_budget` combines this with
+the remaining coefficient-transform layouts.  Before flags/carries/comparators:
+
+```text
+Google low-qubit scratch allowance beyond tx,ty = 663q
+r-as-output coefficient DIV floor              = 768q
+second-channel coefficient DIV floor           = 1280q
+```
+
+So exact history + coefficient-transform Kaliski cannot hit the 1175q low-qubit
+target.  At best it might be a low-gate-ish architecture if its Toffoli cost were
+excellent, but the self-cleaning/history findings above make that unlikely with
+current primitives.
+
 ### Jumped Kaliski matrix route hard gate
 
 A separate two-inversion route was Kaliski windowing: store short matrix hints

@@ -383,6 +383,30 @@ fn exact_branch_history_has_field_entropy_lower_bound() {
 }
 
 #[test]
+fn coefficient_transform_history_floor_misses_low_qubit_budget() {
+    // Combine the 256-bit branch-history information floor with the minimum
+    // live registers of the remaining coefficient-transform DIV shapes.  This
+    // is a qubit lower bound, before flags, carries, comparators, or modular
+    // arithmetic workspace.
+    const N: usize = 256;
+    const GOOGLE_LOW_QUBIT_TOTAL: usize = 1175;
+    const DATA_REGS: usize = 2 * N;
+    const SCRATCH_ALLOWANCE: usize = GOOGLE_LOW_QUBIT_TOTAL - DATA_REGS;
+    let history_floor = N;
+    let r_as_output_floor = N /* u */ + N /* r/output channel */ + history_floor;
+    let second_channel_floor = N /* u */
+        + N /* quotient/output channel */
+        + 2 * N /* x-preserving coefficient pair leaves a(x),x */
+        + history_floor;
+    eprintln!(
+        "coefficient-transform scratch floors: allowance={SCRATCH_ALLOWANCE}, r_as_output={r_as_output_floor}, second_channel={second_channel_floor}"
+    );
+    assert_eq!(SCRATCH_ALLOWANCE, 663);
+    assert!(r_as_output_floor > SCRATCH_ALLOWANCE);
+    assert!(second_channel_floor > SCRATCH_ALLOWANCE);
+}
+
+#[test]
 fn initial_x_to_branch_history_oracle_is_dense_on_toy_kaliski() {
     // Compressing m/a history down to the initial denominator x is
     // information-theoretically possible (history is deterministic from x), but

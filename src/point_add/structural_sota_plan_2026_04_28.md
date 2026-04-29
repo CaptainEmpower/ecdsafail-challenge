@@ -1632,9 +1632,13 @@ parity as full-degree/near-half-density in `x` (`n=8: degree 8, density 116/256;
 `n=12: degree 11, density 1976/4096`).  `exact_branch_history_has_field_entropy_lower_bound`
 adds the information floor: complete branch sequences are injective in toy
 fields and collision-free on 4096 secp samples, so exact history encoding needs
-~256 bits.  So branch cleanup cannot simply inspect live post-state, use a tiny
-x-oracle, or compress to ~64 bits; it needs substantial history, a different
-invariant, or a deliberate approximate exception argument.
+~256 bits.  `coefficient_transform_history_floor_misses_low_qubit_budget` then
+combines this with the remaining layouts: r-as-output coefficient DIV has a
+768q scratch floor and second-channel DIV has a 1280q floor, before flags or
+adder workspace, versus Google's low-qubit allowance of 663q beyond `tx,ty`.
+So branch cleanup cannot simply inspect live post-state, use a tiny x-oracle,
+compress to ~64 bits, or fit exact coefficient-transform history into low-qubit;
+it needs a different invariant or a deliberate approximate exception argument.
 
 Coefficient-transform refinement checked: a single Kaliski coefficient pair
 cannot both preserve `x` and expose `y/x` by just using a constant tag.  If
