@@ -1076,6 +1076,80 @@ fn csub_nbit_const_fast(b: &mut B, acc: &[QubitId], c: U256, ctrl: QubitId) {
     b.free_vec(&a);
 }
 
+/// Controlled subtract of a classical constant without materializing the
+/// `ctrl ? c : 0` addend.  This is the same measurement-uncomputed ripple idea
+/// as [`sub_nbit_qq_fast`], but the carry/borrow recurrence is specialized to a
+/// classical bit and the external control.  It saves the n-qubit loaded-constant
+/// register at Kaliski halve peaks; for sparse secp256k1 `c=2^32+977` the CCX
+/// count is essentially unchanged.
+fn csub_nbit_const_direct_fast(b: &mut B, acc: &[QubitId], c: U256, ctrl: QubitId) {
+    let n = acc.len();
+    if n == 0 {
+        return;
+    }
+    if n == 1 {
+        if bit(c, 0) {
+            b.cx(ctrl, acc[0]);
+        }
+        return;
+    }
+
+    let borrows = b.alloc_qubits(n - 1);
+
+    // Forward borrow sweep. borrow_{i+1} = majority(!acc_i, k_i, borrow_i),
+    // where k_i = ctrl when c_i=1 and 0 otherwise.
+    for i in 0..n - 1 {
+        let target = borrows[i];
+        let borrow_in = if i == 0 { None } else { Some(borrows[i - 1]) };
+        if bit(c, i) {
+            b.x(acc[i]);
+            if let Some(bi) = borrow_in {
+                b.ccx(acc[i], bi, target);
+                b.ccx(ctrl, acc[i], target);
+                b.ccx(ctrl, bi, target);
+            } else {
+                b.ccx(acc[i], ctrl, target);
+            }
+            b.x(acc[i]);
+        } else if let Some(bi) = borrow_in {
+            b.x(acc[i]);
+            b.ccx(acc[i], bi, target);
+            b.x(acc[i]);
+        }
+    }
+
+    // Difference bits: acc_i ^= k_i ^ borrow_i.
+    for i in 0..n {
+        if bit(c, i) {
+            b.cx(ctrl, acc[i]);
+        }
+        if i > 0 {
+            b.cx(borrows[i - 1], acc[i]);
+        }
+    }
+
+    // Measurement-uncompute borrows in reverse.  For subtraction the post-sum
+    // identity is borrow_{i+1} = majority(acc_i_final, k_i, borrow_i).
+    for i in (0..n - 1).rev() {
+        let m = b.alloc_bit();
+        b.hmr(borrows[i], m);
+        let borrow_in = if i == 0 { None } else { Some(borrows[i - 1]) };
+        if bit(c, i) {
+            if let Some(bi) = borrow_in {
+                b.cz_if(acc[i], ctrl, m);
+                b.cz_if(acc[i], bi, m);
+                b.cz_if(ctrl, bi, m);
+            } else {
+                b.cz_if(acc[i], ctrl, m);
+            }
+        } else if let Some(bi) = borrow_in {
+            b.cz_if(acc[i], bi, m);
+        }
+    }
+
+    b.free_vec(&borrows);
+}
+
 fn cadd_nbit_const_fast(b: &mut B, acc: &[QubitId], c: U256, ctrl: QubitId) {
     let n = acc.len();
     let a = b.alloc_qubits(n);
@@ -1091,6 +1165,76 @@ fn cadd_nbit_const_fast(b: &mut B, acc: &[QubitId], c: U256, ctrl: QubitId) {
         }
     }
     b.free_vec(&a);
+}
+
+/// Controlled add of a classical constant without a loaded addend register.
+/// This is the carry analogue of [`csub_nbit_const_direct_fast`].
+fn cadd_nbit_const_direct_fast(b: &mut B, acc: &[QubitId], c: U256, ctrl: QubitId) {
+    let n = acc.len();
+    if n == 0 {
+        return;
+    }
+    if n == 1 {
+        if bit(c, 0) {
+            b.cx(ctrl, acc[0]);
+        }
+        return;
+    }
+
+    let carries = b.alloc_qubits(n - 1);
+
+    // Forward carry sweep. carry_{i+1} = majority(acc_i, k_i, carry_i).
+    for i in 0..n - 1 {
+        let target = carries[i];
+        let carry_in = if i == 0 { None } else { Some(carries[i - 1]) };
+        if bit(c, i) {
+            if let Some(ci) = carry_in {
+                b.ccx(acc[i], ci, target);
+                b.ccx(ctrl, acc[i], target);
+                b.ccx(ctrl, ci, target);
+            } else {
+                b.ccx(acc[i], ctrl, target);
+            }
+        } else if let Some(ci) = carry_in {
+            b.ccx(acc[i], ci, target);
+        }
+    }
+
+    // Sum bits: acc_i ^= k_i ^ carry_i.
+    for i in 0..n {
+        if bit(c, i) {
+            b.cx(ctrl, acc[i]);
+        }
+        if i > 0 {
+            b.cx(carries[i - 1], acc[i]);
+        }
+    }
+
+    // Measurement-uncompute carries in reverse.  For addition the post-sum
+    // identity is carry_{i+1} = majority(!acc_i_final, k_i, carry_i).
+    for i in (0..n - 1).rev() {
+        let m = b.alloc_bit();
+        b.hmr(carries[i], m);
+        let carry_in = if i == 0 { None } else { Some(carries[i - 1]) };
+        if bit(c, i) {
+            b.x(acc[i]);
+            if let Some(ci) = carry_in {
+                b.cz_if(acc[i], ctrl, m);
+                b.cz_if(acc[i], ci, m);
+                b.x(acc[i]);
+                b.cz_if(ctrl, ci, m);
+            } else {
+                b.cz_if(acc[i], ctrl, m);
+                b.x(acc[i]);
+            }
+        } else if let Some(ci) = carry_in {
+            b.x(acc[i]);
+            b.cz_if(acc[i], ci, m);
+            b.x(acc[i]);
+        }
+    }
+
+    b.free_vec(&carries);
 }
 
 fn add_nbit_const_fast(b: &mut B, acc: &[QubitId], c: U256) {
@@ -1181,7 +1325,11 @@ fn mod_double_inplace_fast(b: &mut B, v: &[QubitId], p: U256) {
     // `ovf` and the low register holds T mod 2^n for T = 2*v. If ovf=1 then
     // T = 2^n + low and T mod p = low + c; otherwise T mod p = low.
     let c = U256::MAX.wrapping_sub(p).wrapping_add(U256::from(1));
-    cadd_nbit_const_fast(b, v, c, ovf);
+    if std::env::var("KAL_DIRECT_CONST_DOUBLE").ok().as_deref() == Some("1") {
+        cadd_nbit_const_direct_fast(b, v, c, ovf);
+    } else {
+        cadd_nbit_const_fast(b, v, c, ovf);
+    }
     // Result parity equals the old top bit: even if ovf=0, odd if ovf=1.
     b.cx(v[0], ovf);
     b.free(ovf);
@@ -1446,6 +1594,8 @@ fn mod_halve_inplace_fast_with_dirty(
         b.free(q_clean2[0]);
         b.free(q_clean2[1]);
         let _ = c_u64; // unused, c_low is the right value
+    } else if std::env::var("KAL_DIRECT_CONST_HALVE").ok().as_deref() == Some("1") {
+        csub_nbit_const_direct_fast(b, v, c, ovf);
     } else {
         csub_nbit_const_fast(b, v, c, ovf);
     }
