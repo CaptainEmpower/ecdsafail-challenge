@@ -724,6 +724,62 @@ mod tests {
         assert_eq!(post, 223);
         assert_eq!(preimages, 512);
     }
+
+    fn quotient_phase_truth_table_anf_stats(n: usize, p: u16, mask: u16) -> (usize, usize) {
+        let vars = 2 * n;
+        let size = 1usize << vars;
+        let limb_mask = (1u16 << n) - 1;
+        let mut inv = vec![0u16; p as usize];
+        for x in 1..p {
+            for y in 1..p {
+                if ((x as u32) * (y as u32)) % (p as u32) == 1 {
+                    inv[x as usize] = y;
+                    break;
+                }
+            }
+        }
+        let mut anf = vec![0u8; size];
+        for idx in 0..size {
+            let x = (idx as u16) & limb_mask;
+            let z = ((idx >> n) as u16) & limb_mask;
+            let q = if x != 0 && x < p && z < p {
+                ((z as u32 * inv[x as usize] as u32) % p as u32) as u16
+            } else {
+                0
+            };
+            anf[idx] = ((q & mask).count_ones() & 1) as u8;
+        }
+        for bit in 0..vars {
+            for idx in 0..size {
+                if (idx & (1usize << bit)) != 0 {
+                    anf[idx] ^= anf[idx ^ (1usize << bit)];
+                }
+            }
+        }
+        let density = anf.iter().filter(|&&c| c != 0).count();
+        let degree = anf
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &c)| if c != 0 { Some(i.count_ones() as usize) } else { None })
+            .max()
+            .unwrap_or(0);
+        (degree, density)
+    }
+
+    #[test]
+    fn mbuc_product_cleanup_phase_oracle_is_not_low_degree_on_toy_field() {
+        // Another possible rescue for Strategy E: compute product into a clean
+        // accumulator, X-measure the old multiplier, and apply only the MBUC
+        // phase correction instead of reversibly dividing by the product
+        // source.  The required phase is a known-mask bit of z/x mod p.
+        // On even an 8-bit toy field this quotient phase function has almost
+        // maximal algebraic degree and about half of all ANF monomials, so the
+        // hoped-for cheap low-degree phase oracle is not present.
+        let (degree, density) = quotient_phase_truth_table_anf_stats(8, 251, 0b1010_0101);
+        eprintln!("quotient phase ANF: degree={degree}, density={density}/65536");
+        assert!(degree >= 14);
+        assert!(density > 30_000);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────

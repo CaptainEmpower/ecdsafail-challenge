@@ -1581,3 +1581,10 @@ finds a concrete small-prime reachable window with 512 valid predecessors for
 the same post-accumulator.  Therefore consumed multiplier bits cannot be cleared
 from the accumulator alone; the circuit would need history/checkpoints or a
 nonlocal inverse, i.e. the same product-clean obstruction.  Kill this primitive.
+
+Second primitive attempt: MBUC product cleanup with a phase-only quotient oracle.
+If we compute `z=x*y`, X-measure the old multiplier, and only correct phase, the
+correction is a known-mask bit of `z/x mod p`.  The toy-field ANF test
+`mbuc_product_cleanup_phase_oracle_is_not_low_degree_on_toy_field` shows degree
+15/16 and 32518/65536 monomial density for `p=251`.  This kills the cheap
+sparse/low-degree phase-correction hope; MBUC cleanup still hides a quotient.

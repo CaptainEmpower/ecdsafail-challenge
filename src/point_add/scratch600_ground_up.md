@@ -658,3 +658,24 @@ which is exactly the product-clean obstruction we were trying to avoid.
 Decision: destructive Montgomery is a useful failed primitive, not a route to
 Strategy E.  A viable IMUL must use a different idea than local recovery from a
 Montgomery accumulator.
+
+### Attempt E2: MBUC product cleanup by phase-only quotient oracle
+
+Another possible IMUL rescue is to compute `z=x*y`, measure the old `y` register
+in the X basis, and apply only the MBUC phase correction instead of reversibly
+recovering `y`.  For a measurement mask `s`, the needed phase is
+
+```text
+(-1)^(s · (z/x mod p))
+```
+
+as a boolean function of the preserved registers `(x,z)`.  If that phase oracle
+were low-degree or sparse, product-clean multiplication might be much cheaper
+than division.
+
+`mbuc_product_cleanup_phase_oracle_is_not_low_degree_on_toy_field` kills the
+cheap version.  On the 8-bit toy field `p=251`, a fixed mask already gives an
+ANF with degree **15 of 16 variables** and density **32518 / 65536** monomials.
+This does not prove every possible phase-oracle implementation is expensive,
+but it rules out the hoped-for sparse/low-degree correction.  The phase-only
+cleanup is just the quotient problem in disguise.
