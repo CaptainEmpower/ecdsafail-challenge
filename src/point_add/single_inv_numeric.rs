@@ -3098,8 +3098,15 @@ mod tests {
         let raw_p99 = raw_payloads[p99];
         let count_p99 = counts[p99];
         let unary_p99 = unary_payloads[p99];
+        let raw_max = *raw_payloads.last().unwrap();
+        let count_max = *counts.last().unwrap();
+        let unary_max = *unary_payloads.last().unwrap();
         let boundary_scratch_p99 = 256 + raw_p99 + count_p99;
         let unary_scratch_p99 = 256 + unary_p99;
+        let boundary_scratch_max = 256 + raw_max + count_max;
+        let unary_scratch_max = 256 + unary_max;
+        let unary_over_google = unary_payloads.iter().filter(|&&u| 256 + u > 663).count();
+        let unary_over_google_frac = unary_over_google as f64 / samples as f64;
         let log_total = (total as f64).log2();
         let mut entropy_lengths = Vec::with_capacity(samples);
         for ks in &seqs {
@@ -3112,18 +3119,27 @@ mod tests {
         }
         entropy_lengths.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let entropy_scratch_p99 = 256.0 + entropy_lengths[p99];
+        let entropy_scratch_max = 256.0 + *entropy_lengths.last().unwrap();
+        let entropy_over_google = entropy_lengths.iter().filter(|&&e| 256.0 + e > 663.0).count();
+        let entropy_over_google_frac = entropy_over_google as f64 / samples as f64;
         eprintln!(
-            "plus-minus k-sequence: dir_max_bits_n16={max_dir_bits}, dir_p99_bits_n16={p99_dir_bits}, raw_p99={raw_p99}, count_p99={count_p99}, boundary_scratch_p99={boundary_scratch_p99}, unary_scratch_p99={unary_scratch_p99}, entropy_scratch_p99={entropy_scratch_p99:.1}"
+            "plus-minus k-sequence: dir_max_bits_n16={max_dir_bits}, dir_p99_bits_n16={p99_dir_bits}, raw_p99={raw_p99}, count_p99={count_p99}, boundary_scratch_p99={boundary_scratch_p99}, unary_scratch_p99={unary_scratch_p99}, unary_scratch_max={unary_scratch_max}, entropy_scratch_p99={entropy_scratch_p99:.1}, entropy_scratch_max={entropy_scratch_max:.1}"
         );
         println!("METRIC plusminus_kseq_direction_max_bits_n16={max_dir_bits}");
         println!("METRIC plusminus_kseq_direction_p99_bits_n16={p99_dir_bits}");
         println!("METRIC plusminus_kseq_boundary_scratch_p99={boundary_scratch_p99}");
         println!("METRIC plusminus_kseq_unary_scratch_p99={unary_scratch_p99}");
         println!("METRIC plusminus_kseq_entropy_scratch_p99={entropy_scratch_p99:.3}");
+        println!("METRIC plusminus_kseq_boundary_scratch_max={boundary_scratch_max}");
+        println!("METRIC plusminus_kseq_unary_scratch_max={unary_scratch_max}");
+        println!("METRIC plusminus_kseq_unary_over_google_frac={unary_over_google_frac:.6}");
+        println!("METRIC plusminus_kseq_entropy_scratch_max={entropy_scratch_max:.3}");
+        println!("METRIC plusminus_kseq_entropy_over_google_frac={entropy_over_google_frac:.6}");
         assert!(max_dir_bits <= 2, "whole k-sequence should nearly determine directions on toys");
         assert!(boundary_scratch_p99 > 740, "explicit k boundaries should miss scratch");
-        assert!(unary_scratch_p99 > 630, "unary/self-delimiting shifts should miss scratch");
-        assert!(entropy_scratch_p99 > 630.0, "empirical entropy-coded k parser should still miss scratch");
+        assert!(unary_scratch_p99 > 630, "unary/self-delimiting shifts should miss strict-600 scratch");
+        assert!(unary_scratch_max <= 663, "sampled unary parser exceeds Google-low-qubit slack; demote plus-minus again");
+        assert!(entropy_scratch_p99 > 630.0, "empirical entropy-coded k parser should still miss strict-600 scratch");
     }
 
     #[test]
