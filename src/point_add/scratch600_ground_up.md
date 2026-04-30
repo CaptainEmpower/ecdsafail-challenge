@@ -1164,6 +1164,34 @@ n=12 p=4093  degree=12/12 density=2072/4096
 For secp256k1 (`p≡3 mod 4`) square root is an exponentiation anyway.  This is
 not a low-cost substitute for the second division or for an in-place multiply.
 
+### Attempt E7: secp256k1 j=0 endomorphism denominator swap
+
+secp256k1 has the base-field automorphism `(x,y)->(βx,y)`.  This gives a real
+special-curve slope identity:
+
+```text
+(x-Qx)(βx-Qx)(β²x-Qx) = x³-Qx³ = (y-Qy)(y+Qy)
+λ = (y-Qy)/(x-Qx) = (x² + Qx*x + Qx²)/(y+Qy)
+```
+
+`secp_j0_endomorphism_slope_denominator_swap_identity_passes` validates this on
+200 random secp256k1 additions (`endomorphism_slope_identity_samples=200`,
+`endomorphism_slope_y_sum_exceptions=0`).  This is algebraically attractive
+because the numerator is x-only quadratic, not `dy` times an inverse.
+
+Early invalidation: the identity does not remove the cleanup wall.  From the
+output side the same slope is
+
+```text
+λ = (Rx² + Qx*Rx + Qx²)/(Qy - Ry)
+```
+
+for the line through `Q` and `-R`.  `endomorphism_slope_swap_cleanup_phase_is_still_dense`
+computes the MBUC/cleanup phase in this output frame and gets toy n=10 ANF
+`degree=20/20`, `density=297278/1048576`.  So the j=0 automorphism is useful
+algebraic ammunition only; by itself it is another quotient-like dense phase,
+not a one-inversion or IMUL replacement.
+
 ### Coordinate-model escape check
 
 Efficient complete addition laws in Montgomery/Edwards/Hessian-like models are

@@ -492,6 +492,63 @@ mod tests {
         });
     }
 
+    fn secp256k1_beta_endomorphism() -> U256 {
+        U256::from_str_radix(
+            "7AE96A2B657C07106E64479EAC3434E99CF0497512F58995C1396C28719501EE",
+            16,
+        )
+        .unwrap()
+    }
+
+    fn j0_endo_slope_numerator_xonly(x: U256, qx: U256, p: U256) -> U256 {
+        x.mul_mod(x, p)
+            .add_mod(qx.mul_mod(x, p), p)
+            .add_mod(qx.mul_mod(qx, p), p)
+    }
+
+    #[test]
+    fn secp_j0_endomorphism_slope_denominator_swap_identity_passes() {
+        // secp256k1 has the j=0 automorphism (x,y)->(βx,y).  Therefore
+        // (x-qx)(βx-qx)(β²x-qx)=x³-qx³=(y-qy)(y+qy), so the affine slope can
+        // be written as
+        //     λ = (y-qy)/(x-qx) = (x² + qx*x + qx²)/(y+qy).
+        // This is a real special-curve identity: it swaps the denominator from
+        // x-qx to y+qy and makes the numerator x-only quadratic.  It is kept as
+        // a candidate algebraic tool, but the follow-up phase test below checks
+        // that it does not by itself solve λ cleanup.
+        let p = SECP256K1_P;
+        let beta = secp256k1_beta_endomorphism();
+        let beta2 = beta.mul_mod(beta, p);
+        assert_eq!(beta.mul_mod(beta2, p), U256::from(1));
+        assert_eq!(beta.add_mod(beta2, p).add_mod(U256::from(1), p), U256::ZERO);
+
+        let mut checked = 0usize;
+        let mut exceptional_y_sum = 0usize;
+        each_trial(|px, py, qx, qy, _rx_ref, _ry_ref| {
+            let den_y_sum = py.add_mod(qy, p);
+            if den_y_sum.is_zero() {
+                exceptional_y_sum += 1;
+                return;
+            }
+            let dx = sub_mod(px, qx, p);
+            let dy = sub_mod(py, qy, p);
+            let lam_standard = dy.mul_mod(dx.inv_mod(p).expect("dx nonzero"), p);
+            let product_form = sub_mod(beta.mul_mod(px, p), qx, p)
+                .mul_mod(sub_mod(beta2.mul_mod(px, p), qx, p), p);
+            let xonly_form = j0_endo_slope_numerator_xonly(px, qx, p);
+            assert_eq!(product_form, xonly_form);
+            let lam_endo = xonly_form.mul_mod(den_y_sum.inv_mod(p).expect("y+qy nonzero"), p);
+            assert_eq!(lam_endo, lam_standard);
+            checked += 1;
+        });
+        eprintln!(
+            "secp j=0 endomorphism slope swap: checked={checked}, exceptional_y_sum={exceptional_y_sum}"
+        );
+        println!("METRIC endomorphism_slope_identity_samples={checked}");
+        println!("METRIC endomorphism_slope_y_sum_exceptions={exceptional_y_sum}");
+        assert!(checked >= 195, "random secp samples hit too many y+Qy exceptional cases");
+    }
+
     #[test]
     fn strategy_a_rx_ok_ry_contaminated_by_dy() {
         // Strategy A is predicted DEAD. Specifically:
@@ -955,6 +1012,58 @@ mod tests {
         mul_mod_u16_for_phase_test(y, y, p) == curve_rhs_u16_for_phase_test(x, p)
     }
 
+    fn endomorphism_output_lambda_phase_anf_stats(n: usize, p: u16, mask: u16) -> (usize, usize) {
+        // For j=0 curves with β in the base field, the same slope cleanup can
+        // be expressed from output R as
+        //     λ = (Rx² + Qx*Rx + Qx²)/(Qy - Ry)
+        // because the line through Q and -R has slope λ.  If the endomorphism
+        // denominator swap were a cheap cleanup, this phase should be sparse.
+        let vars = 2 * n;
+        let size = 1usize << vars;
+        let limb_mask = (1u16 << n) - 1;
+        let (qx, qy) = first_curve_point_u16_for_phase_test(p);
+        let mut anf = vec![0u8; size];
+        for idx in 0..size {
+            let rx = (idx as u16) & limb_mask;
+            let ry = ((idx >> n) as u16) & limb_mask;
+            let lam = if rx < p && ry < p && is_curve_point_u16_for_phase_test(rx, ry, p) {
+                let den = sub_mod_u16_for_phase_test(qy, ry, p);
+                if den == 0 {
+                    0
+                } else {
+                    let numer = add_mod_u16_for_phase_test(
+                        add_mod_u16_for_phase_test(
+                            mul_mod_u16_for_phase_test(rx, rx, p),
+                            mul_mod_u16_for_phase_test(qx, rx, p),
+                            p,
+                        ),
+                        mul_mod_u16_for_phase_test(qx, qx, p),
+                        p,
+                    );
+                    mul_mod_u16_for_phase_test(numer, inv_mod_u16_for_phase_test(den, p), p)
+                }
+            } else {
+                0
+            };
+            anf[idx] = ((lam & mask).count_ones() & 1) as u8;
+        }
+        for bit in 0..vars {
+            for idx in 0..size {
+                if (idx & (1usize << bit)) != 0 {
+                    anf[idx] ^= anf[idx ^ (1usize << bit)];
+                }
+            }
+        }
+        let density = anf.iter().filter(|&&c| c != 0).count();
+        let degree = anf
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &c)| if c != 0 { Some(i.count_ones() as usize) } else { None })
+            .max()
+            .unwrap_or(0);
+        (degree, density)
+    }
+
     fn point_sub_const_u16_for_phase_test(rx: u16, ry: u16, qx: u16, qy: u16, p: u16) -> Option<(u16, u16)> {
         if !is_curve_point_u16_for_phase_test(rx, ry, p) {
             return None;
@@ -1046,22 +1155,41 @@ mod tests {
         // the affine reversibility wall; it just asks for a phase version of
         // point subtraction.
         let p = 251u16;
-        let (mut qx, mut qy) = (0u16, 0u16);
-        'outer: for x in 1..p {
-            for y in 1..p {
-                if is_curve_point_u16_for_phase_test(x, y, p) {
-                    qx = x;
-                    qy = y;
-                    break 'outer;
-                }
-            }
-        }
+        let (qx, qy) = first_curve_point_u16_for_phase_test(p);
         let (degree, density) = top_level_measured_input_phase_anf_stats(8, p, qx, qy, 0b1010_0101_0101_1010);
         eprintln!(
             "Top-level old-point MBUC phase ANF: q=({qx},{qy}), degree={degree}, density={density}/65536"
         );
         assert!(degree >= 14);
         assert!(density > 10_000);
+    }
+
+    #[test]
+    fn endomorphism_slope_swap_cleanup_phase_is_still_dense() {
+        // The j=0 denominator swap is algebraically real and removes dy from
+        // the *forward* slope numerator, but cleaning a measured/live λ from the
+        // output still asks for a quotient-like phase:
+        //     λ = (Rx² + Qx*Rx + Qx²)/(Qy - Ry).
+        // Full-domain toy ANFs are already high-degree/dense, so this special
+        // secp256k1 automorphism is not a free one-inversion cleanup.
+        let cases = [
+            (8usize, 241u16, 0b1010_0101u16, 15usize, 20_000usize),
+            (10usize, 1009u16, 0b10_1001_0101u16, 18usize, 250_000usize),
+        ];
+        for &(n, p, mask, min_degree, min_density) in &cases {
+            let (degree, density) = endomorphism_output_lambda_phase_anf_stats(n, p, mask);
+            let table = 1usize << (2 * n);
+            eprintln!(
+                "Endomorphism slope-cleanup phase ANF: n={n}, p={p}, degree={degree}/{}, density={density}/{table}",
+                2 * n
+            );
+            if n == 10 {
+                println!("METRIC endomorphism_slope_phase_degree_n10={degree}");
+                println!("METRIC endomorphism_slope_phase_density_n10={density}");
+            }
+            assert!(degree >= min_degree);
+            assert!(density >= min_density);
+        }
     }
 
     fn monomial_masks_for_curve_phase_test(vars: usize, max_degree: usize) -> Vec<u32> {

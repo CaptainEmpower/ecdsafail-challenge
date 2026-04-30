@@ -1804,6 +1804,16 @@ near-half-density ANFs for mask bits of `a(x)` (`n=8: 132/256`,
 `n=12: 2094/4096`).  A one-pair DIV still needs either a second channel or a
 different triangular Euclidean transform.
 
+secp256k1-specific j=0 automorphism check: `(x,y)->(βx,y)` gives the identity
+`(x-Qx)(βx-Qx)(β²x-Qx)=(y-Qy)(y+Qy)`, hence
+`λ=(x²+Qx*x+Qx²)/(y+Qy)`.  `secp_j0_endomorphism_slope_denominator_swap_identity_passes`
+validates the denominator swap on 200/200 secp samples with zero y-sum
+exceptions.  But it is not a cleanup primitive: from the output frame,
+`λ=(Rx²+Qx*Rx+Qx²)/(Qy-Ry)`, and
+`endomorphism_slope_swap_cleanup_phase_is_still_dense` gets toy n=10 phase ANF
+`degree=20/20`, `density=297278/1048576`.  The automorphism is useful algebra,
+but still quotient-like for reversible cleanup.
+
 Coordinate-model escape check: `efficient_curve_model_transforms_need_missing_torsion`
 records that secp256k1's prime-order group has `order mod 2 = 1` and
 `order mod 3 = 1`.  Base-field Montgomery/Edwards models need rational
