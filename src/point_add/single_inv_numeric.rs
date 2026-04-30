@@ -2735,6 +2735,17 @@ mod tests {
         out
     }
 
+    fn plusminus_toy_max_scale_steps(p: u16) -> (usize, usize) {
+        let mut max_scale = 0usize;
+        let mut max_steps = 0usize;
+        for x in 1..p {
+            let (ks, _dirs) = plusminus_kseq_dirs_for_toy(x, p);
+            max_scale = max_scale.max(ks.iter().sum::<usize>());
+            max_steps = max_steps.max(ks.len());
+        }
+        (max_scale, max_steps)
+    }
+
     fn plusminus_raw_k_rank_anf_stats(n: usize, p: u16) -> (usize, usize, usize) {
         use std::collections::{BTreeMap, BTreeSet};
         let size = 1usize << n;
@@ -3057,6 +3068,25 @@ mod tests {
         assert!(matrix_p99 < 540, "first half-GCD matrix should be compact enough to be tempting");
         assert!(matrix_residual_p99 > 760, "matrix plus live residual state exceeds 600 scratch");
         assert!(matrix_tail_p99 > 680, "matrix plus even raw tail payload exceeds 600 scratch");
+    }
+
+    #[test]
+    fn plusminus_toy_worstcase_scale_steps_grow_linearly() {
+        // Exact exhaustive toy maxima for the ordered plus-minus k stream.  This
+        // is not a secp proof, but it is the first check on whether sampled
+        // S≈400 tails might hide an exponential/worst-case disaster.
+        let cases = [(8usize, 251u16), (12usize, 4093u16), (16usize, 65521u16)];
+        let mut last_scale = 0usize;
+        for &(n, p) in &cases {
+            let (max_scale, max_steps) = plusminus_toy_max_scale_steps(p);
+            eprintln!("plus-minus toy worst case: n={n}, p={p}, max_scale={max_scale}, max_steps={max_steps}");
+            if n == 16 {
+                println!("METRIC plusminus_toy_n16_max_scale={max_scale}");
+                println!("METRIC plusminus_toy_n16_max_steps={max_steps}");
+            }
+            assert!(max_scale >= last_scale);
+            last_scale = max_scale;
+        }
     }
 
     #[test]
