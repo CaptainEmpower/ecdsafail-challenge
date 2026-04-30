@@ -2585,6 +2585,99 @@ mod tests {
         if x == 0 { 1 } else { usize::BITS as usize - x.leading_zeros() as usize }
     }
 
+    fn signed_shr_exact_for_unordered_plusminus_test(
+        x: SignedMagU512ForHalfGcdTest,
+        k: usize,
+    ) -> SignedMagU512ForHalfGcdTest {
+        if k == 0 {
+            x
+        } else {
+            debug_assert!(x.mag.is_zero() || x.mag.trailing_zeros() as usize >= k);
+            smag_for_halfgcd_test(x.neg, x.mag >> k)
+        }
+    }
+
+    fn plusminus_unordered_signed_den_trace_for_divisor(x: U256, p: U256) -> (usize, usize, usize, usize) {
+        // Variant considered after the ordered plus-minus denominator-shift
+        // blocker: drop magnitude ordering entirely and iterate signed pairs
+        //     (u,v) -> (v, (u-v)/2^k),  k=v2(u-v).
+        // This removes compare/cswap and persistent direction controls, but it
+        // still needs a data-dependent exact denominator shift every step.  The
+        // helper tracks only denominator state and scale/history pressure; it
+        // deliberately does not give the route credit for unbuilt coefficient
+        // arithmetic.
+        let mut u = smag_for_halfgcd_test(false, u512_from_u256_for_halfgcd_test(p));
+        let mut v = smag_for_halfgcd_test(false, u512_from_u256_for_halfgcd_test(x));
+        let initial_twos = x.trailing_zeros() as usize;
+        v = signed_shr_exact_for_unordered_plusminus_test(v, initial_twos);
+        let mut scale = initial_twos;
+        let mut steps = 0usize;
+        let mut max_width = u512_bit_len_for_halfgcd_test(u.mag).max(u512_bit_len_for_halfgcd_test(v.mag));
+        let mut max_k = initial_twos;
+        while v.mag != U512::from(1u64) {
+            let d = signed_add_for_halfgcd_test(u, signed_neg_for_halfgcd_test(v));
+            assert!(!d.mag.is_zero(), "unordered signed recurrence hit zero before gcd 1");
+            let k = d.mag.trailing_zeros() as usize;
+            let next = signed_shr_exact_for_unordered_plusminus_test(d, k);
+            scale += k;
+            max_k = max_k.max(k);
+            u = v;
+            v = next;
+            steps += 1;
+            max_width = max_width.max(u512_bit_len_for_halfgcd_test(u.mag)).max(u512_bit_len_for_halfgcd_test(v.mag));
+            assert!(steps < 2048, "unordered signed plus-minus did not converge fast enough");
+        }
+        (steps, scale, max_width, max_k)
+    }
+
+    #[test]
+    fn plusminus_unordered_signed_recurrence_still_shift_dead() {
+        // First new recurrence after demoting denominator-offset normalization:
+        // remove ordering, direction, and compare/cswap from plus-minus by
+        // allowing signed denominators.  This is a useful pre-mortem because it
+        // attacks the right pain point, but a lower bound charging *only* one
+        // signed denominator barrel shift per step already misses the 2.7M
+        // low-qubit target.
+        let p = SECP256K1_P;
+        let samples = 4096usize;
+        let mut rng = 0x516e_ded0_5a1d_f00du64;
+        let mut steps = Vec::with_capacity(samples);
+        let mut scales = Vec::with_capacity(samples);
+        let mut max_width = 0usize;
+        let mut max_k = 0usize;
+        while steps.len() < samples {
+            let x = rand_u256(&mut rng);
+            if x.is_zero() { continue; }
+            let (s, scale, width, k) = plusminus_unordered_signed_den_trace_for_divisor(x, p);
+            steps.push(s);
+            scales.push(scale);
+            max_width = max_width.max(width);
+            max_k = max_k.max(k);
+        }
+        steps.sort_unstable();
+        scales.sort_unstable();
+        let p99_steps = steps[(samples * 99) / 100];
+        let max_steps = *steps.last().unwrap();
+        let p99_scale = scales[(samples * 99) / 100];
+        let max_scale = *scales.last().unwrap();
+        let signed_den_barrel257_ccx = 2_393usize; // measured signed barrel extrapolation.
+        let scaffold_after_div = 642_716usize;
+        let two_div_den_shift_only = 2usize * p99_steps * signed_den_barrel257_ccx;
+        let projected_den_shift_only = scaffold_after_div + two_div_den_shift_only;
+        let gap = projected_den_shift_only as isize - 2_700_000isize;
+        eprintln!("unordered signed plus-minus: p99_steps={p99_steps}, max_steps={max_steps}, p99_scale={p99_scale}, max_scale={max_scale}, max_width={max_width}, max_k={max_k}, den_shift_only_total={projected_den_shift_only}, gap={gap}");
+        println!("METRIC plusminus_unordered_signed_p99_steps={p99_steps}");
+        println!("METRIC plusminus_unordered_signed_max_steps={max_steps}");
+        println!("METRIC plusminus_unordered_signed_p99_scale={p99_scale}");
+        println!("METRIC plusminus_unordered_signed_max_scale={max_scale}");
+        println!("METRIC plusminus_unordered_signed_max_den_width={max_width}");
+        println!("METRIC plusminus_unordered_signed_max_k={max_k}");
+        println!("METRIC plusminus_unordered_signed_den_shift_only_total_ccx={projected_den_shift_only}");
+        println!("METRIC plusminus_unordered_signed_den_shift_only_gap_ccx={gap}");
+        assert!(max_width <= 257, "signed unordered denominators exceed one lane");
+        assert!(gap > 0, "denominator-shift-only lower bound would fit; revisit unordered signed recurrence");
+    }
+
     fn plusminus_odd_gcd_payload_for_divisor(x: U256, p: U256) -> (usize, usize, usize) {
         // A from-scratch non-BY idea: strip powers of two from x, then run an
         // ordered odd GCD where each step replaces (u>=v) by the ordered pair
