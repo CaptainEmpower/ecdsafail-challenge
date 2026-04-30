@@ -1099,3 +1099,5 @@ timestamp	commit	toffoli	clifford	qubits	ops	correct	notes
 1777577413	30df8d3	4089274.000	24292787.153	2713	30575944	OK	autoresearch-checks
 1777577524	9e08d84	4089274.000	24292787.153	2713	30575944	OK	schoolbook addsub correction3: cuccaro_sub_fast -> cuccaro_sub (saves 2n peak carries) 
 1777577553	9e08d84	4089274.000	24292787.153	2713	30575944	OK	autoresearch-checks
+1777577672	d2b8317	4089274.000	24292787.153	2713	30575944	OK	schoolbook addsub correction3: cuccaro_sub_fast -> cuccaro_sub (saves 2n peak carries) 
+1777577701	d2b8317	4089274.000	24292787.153	2713	30575944	OK	autoresearch-checks

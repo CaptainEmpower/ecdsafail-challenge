@@ -3400,6 +3400,58 @@ mod tests {
         acc
     }
 
+    fn local_count_ccx_for_plusminus_cost(ops: &[crate::circuit::Op]) -> usize {
+        ops.iter()
+            .filter(|o| matches!(o.kind, crate::circuit::OperationType::CCX | crate::circuit::OperationType::CCZ))
+            .count()
+    }
+
+    fn local_cswap_for_plusminus_cost(
+        b: &mut super::super::B,
+        ctrl: super::super::QubitId,
+        a: super::super::QubitId,
+        t: super::super::QubitId,
+    ) {
+        b.cx(t, a);
+        b.ccx(ctrl, a, t);
+        b.cx(t, a);
+    }
+
+    fn controlled_integer_add_cost_for_plusminus(width: usize) -> usize {
+        let mut b = super::super::B::new();
+        let acc = b.alloc_qubits(width);
+        let a = b.alloc_qubits(width);
+        let ctrl = b.alloc_qubit();
+        let f = b.alloc_qubits(width);
+        let start = b.ops.len();
+        for i in 0..width {
+            b.ccx(ctrl, a[i], f[i]);
+        }
+        super::super::add_nbit_qq_fast(&mut b, &f, &acc);
+        for i in 0..width {
+            let m = b.alloc_bit();
+            b.hmr(f[i], m);
+            b.cz_if(ctrl, a[i], m);
+        }
+        local_count_ccx_for_plusminus_cost(&b.ops[start..])
+    }
+
+    fn controlled_left_shift_cost_for_plusminus(width: usize) -> usize {
+        // Cost a reversible controlled left-shift by one with one clean low-bit
+        // placeholder.  A production signed representation must prove the top
+        // sign/overflow bit is recoverable; this is the optimistic cswap floor.
+        let mut b = super::super::B::new();
+        let v = b.alloc_qubits(width);
+        let z = b.alloc_qubit();
+        let ctrl = b.alloc_qubit();
+        let start = b.ops.len();
+        for i in (0..width).rev() {
+            let lo = if i == 0 { z } else { v[i - 1] };
+            local_cswap_for_plusminus_cost(&mut b, ctrl, lo, v[i]);
+        }
+        local_count_ccx_for_plusminus_cost(&b.ops[start..])
+    }
+
     #[test]
     fn plusminus_scaled_integer_coefficients_recover_inverse() {
         // Algebra check for the cheap-shift representation: final coefficient c
@@ -3426,6 +3478,52 @@ mod tests {
         println!("METRIC plusminus_scaled_coeff_inverse_samples={samples}");
         println!("METRIC plusminus_scaled_coeff_inverse_max_scale={max_scale}");
         println!("METRIC plusminus_scaled_coeff_inverse_max_width={max_width}");
+    }
+
+    #[test]
+    fn plusminus_scaled_integer_controlled_step_cost_is_sota_shaped_if_overflow_clean() {
+        // Replace the modular controlled halve/double tax (1280 CCX) with the
+        // operation suggested by the scaled-integer algebra: controlled signed
+        // integer add/sub for cd=cu-cv and controlled left-shift/relabel for
+        // retained coefficients.  This charges the obvious cswap/add floor but
+        // still leaves the hard proof obligations explicit: signed overflow/top
+        // bit recovery, direction controls, and full reversible cleanup.
+        const WIDTH: usize = 257; // 256 magnitude bits plus sign/guard.
+        let cint_add_ccx = controlled_integer_add_cost_for_plusminus(WIDTH);
+        let cshift_ccx = controlled_left_shift_cost_for_plusminus(WIDTH);
+        let p = SECP256K1_P;
+        let samples = 8192usize;
+        let mut rng = 0xadd5_1f75_6635_c0deu64;
+        let mut one_div = Vec::with_capacity(samples);
+        for _ in 0..samples {
+            let mut x = rand_u256(&mut rng);
+            if x.is_zero() { x = U256::from(1u64); }
+            let ks = plusminus_k_sequence_for_divisor(x, p);
+            let unary: usize = ks.iter().sum();
+            let steps = ks.len();
+            // Two channels (denominator-like + coefficient-like).  Direction
+            // muxing and sign/range canonicalization are not included.
+            one_div.push(2 * (steps * cint_add_ccx + unary * cshift_ccx));
+        }
+        one_div.sort_unstable();
+        let p99 = samples * 99 / 100;
+        let one_div_p99 = one_div[p99];
+        let one_div_max = *one_div.last().unwrap();
+        let two_div_p99 = 2 * one_div_p99;
+        let scaffold_after_div = 642_716usize;
+        let projected_p99 = scaffold_after_div + two_div_p99;
+        let gap_p99 = projected_p99 as isize - 2_700_000isize;
+        eprintln!(
+            "plus-minus scaled integer controlled step cost: cint_add={cint_add_ccx}, cshift={cshift_ccx}, one_div_p99={one_div_p99}, projected_p99={projected_p99}, gap_p99={gap_p99}"
+        );
+        println!("METRIC plusminus_scaled_integer_cint_add_ccx={cint_add_ccx}");
+        println!("METRIC plusminus_scaled_integer_cshift_ccx={cshift_ccx}");
+        println!("METRIC plusminus_scaled_integer_one_div_p99_ccx={one_div_p99}");
+        println!("METRIC plusminus_scaled_integer_one_div_max_ccx={one_div_max}");
+        println!("METRIC plusminus_scaled_integer_two_div_p99_ccx={two_div_p99}");
+        println!("METRIC plusminus_scaled_integer_projected_p99_toffoli={projected_p99}");
+        println!("METRIC plusminus_scaled_integer_gap_p99_to_2700k={gap_p99}");
+        assert!(gap_p99 < 0, "scaled-integer plus-minus floor is not SOTA-shaped before cleanup tax");
     }
 
     #[test]
