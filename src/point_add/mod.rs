@@ -1008,6 +1008,30 @@ fn sub_nbit_qq(b: &mut B, a: &[QubitId], acc: &[QubitId]) {
     b.free(c_in);
 }
 
+fn centered_restoring_trial_subtract_clean(
+    b: &mut B,
+    u: &[QubitId],
+    v: &[QubitId],
+    q_success: QubitId,
+) {
+    // Trial subtract for a centered-Euclid quotient bit. Compute the borrow,
+    // copy out the success bit, then undo with the arithmetic inverse instead
+    // of replaying the Cuccaro subtract wrapper through emit_inverse.
+    assert_eq!(u.len(), v.len());
+    let top_u = b.alloc_qubit();
+    let top_v = b.alloc_qubit();
+    let mut u_ext = u.to_vec();
+    u_ext.push(top_u);
+    let mut v_ext = v.to_vec();
+    v_ext.push(top_v);
+    sub_nbit_qq(b, &v_ext, &u_ext);
+    b.cx(top_u, q_success);
+    b.x(q_success);
+    add_nbit_qq(b, &v_ext, &u_ext);
+    b.free(top_v);
+    b.free(top_u);
+}
+
 fn add_nbit_const(b: &mut B, acc: &[QubitId], c: U256) {
     let n = acc.len();
     let a = load_const(b, n, c);
@@ -1537,6 +1561,129 @@ fn mod_shift_right_by_k(
     cuccaro_op(b, 0, true); // undo +spill·2^0
 
     // Reverse step 1: reverse swap cascades.
+    for shift_i in (0..k).rev() {
+        for i in 0..n - 1 {
+            b.swap(v[i], v[i + 1]);
+        }
+        b.swap(v[n - 1], spill[k - 1 - shift_i]);
+    }
+
+    b.free(ovf);
+    b.free_vec(&spill);
+}
+
+fn mod_shift_left_by_k_lowq(
+    b: &mut B,
+    v: &[QubitId],
+    p: U256,
+    k: usize,
+) -> (Vec<QubitId>, QubitId, QubitId) {
+    let n = v.len();
+    debug_assert_eq!(n, 256);
+    let c = U256::MAX.wrapping_sub(p).wrapping_add(U256::from(1));
+
+    let spill = b.alloc_qubits(k);
+    let ovf = b.alloc_qubit();
+    let flag_inv = b.alloc_qubit();
+
+    for shift_i in 0..k {
+        b.swap(v[n - 1], spill[k - 1 - shift_i]);
+        for i in (0..n - 1).rev() {
+            b.swap(v[i], v[i + 1]);
+        }
+    }
+
+    let mut v_ext = v.to_vec();
+    v_ext.push(ovf);
+    let cuccaro_op = |b: &mut B, pos: usize, is_sub: bool| {
+        let pad_width = n + 1 - pos;
+        let padded = b.alloc_qubits(pad_width);
+        for i in 0..k.min(pad_width) {
+            b.cx(spill[i], padded[i]);
+        }
+        let v_slice: Vec<QubitId> = v_ext[pos..n + 1].to_vec();
+        let c_in = b.alloc_qubit();
+        if is_sub {
+            cuccaro_sub(b, &padded, &v_slice, c_in);
+        } else {
+            cuccaro_add(b, &padded, &v_slice, c_in);
+        }
+        b.free(c_in);
+        for i in 0..k.min(pad_width) {
+            b.cx(spill[i], padded[i]);
+        }
+        b.free_vec(&padded);
+    };
+    cuccaro_op(b, 0, false);
+    cuccaro_op(b, 4, false);
+    cuccaro_op(b, 6, true);
+    cuccaro_op(b, 10, false);
+    cuccaro_op(b, 32, false);
+
+    add_nbit_const(b, &v_ext, c);
+    b.x(ovf);
+    b.cx(ovf, flag_inv);
+    b.x(ovf);
+    csub_nbit_const(b, &v_ext, c, flag_inv);
+    b.x(flag_inv);
+    b.cx(flag_inv, ovf);
+    b.x(flag_inv);
+
+    (spill, flag_inv, ovf)
+}
+
+fn mod_shift_right_by_k_lowq(
+    b: &mut B,
+    v: &[QubitId],
+    p: U256,
+    k: usize,
+    spill: Vec<QubitId>,
+    flag_inv: QubitId,
+    ovf: QubitId,
+) {
+    let n = v.len();
+    debug_assert_eq!(n, 256);
+    let c = U256::MAX.wrapping_sub(p).wrapping_add(U256::from(1));
+
+    let mut v_ext = v.to_vec();
+    v_ext.push(ovf);
+
+    b.x(flag_inv);
+    b.cx(flag_inv, ovf);
+    b.x(flag_inv);
+    cadd_nbit_const(b, &v_ext, c, flag_inv);
+
+    b.x(ovf);
+    b.cx(ovf, flag_inv);
+    b.x(ovf);
+    sub_nbit_const(b, &v_ext, c);
+    b.free(flag_inv);
+
+    let cuccaro_op = |b: &mut B, pos: usize, is_sub: bool| {
+        let pad_width = n + 1 - pos;
+        let padded = b.alloc_qubits(pad_width);
+        for i in 0..k.min(pad_width) {
+            b.cx(spill[i], padded[i]);
+        }
+        let v_slice: Vec<QubitId> = v_ext[pos..n + 1].to_vec();
+        let c_in = b.alloc_qubit();
+        if is_sub {
+            cuccaro_sub(b, &padded, &v_slice, c_in);
+        } else {
+            cuccaro_add(b, &padded, &v_slice, c_in);
+        }
+        b.free(c_in);
+        for i in 0..k.min(pad_width) {
+            b.cx(spill[i], padded[i]);
+        }
+        b.free_vec(&padded);
+    };
+    cuccaro_op(b, 32, true);
+    cuccaro_op(b, 10, true);
+    cuccaro_op(b, 6, false);
+    cuccaro_op(b, 4, true);
+    cuccaro_op(b, 0, true);
+
     for shift_i in (0..k).rev() {
         for i in 0..n - 1 {
             b.swap(v[i], v[i + 1]);
@@ -3591,6 +3738,43 @@ fn squaring_sub_from_acc_schoolbook(b: &mut B, acc: &[QubitId], x: &[QubitId], p
     b.free_vec(&tmp_ext);
 }
 
+fn squaring_sub_from_acc_schoolbook_lowq_shift22(b: &mut B, acc: &[QubitId], x: &[QubitId], p: U256) {
+    let n = acc.len();
+    debug_assert_eq!(n, 256);
+    debug_assert_eq!(x.len(), n);
+    let c = U256::MAX.wrapping_sub(p).wrapping_add(U256::from(1));
+
+    let tmp_ext = b.alloc_qubits(2 * n);
+    schoolbook_square_symmetric(b, x, &tmp_ext);
+
+    let lo: Vec<QubitId> = tmp_ext[0..n].to_vec();
+    let hi: Vec<QubitId> = tmp_ext[n..2 * n].to_vec();
+    mod_sub_qq_fast(b, acc, &lo, p);
+    let _ = c;
+    mod_sub_qq_fast(b, acc, &hi, p);
+    for _ in 0..4 {
+        mod_double_inplace_fast(b, &hi, p);
+    }
+    mod_sub_qq_fast(b, acc, &hi, p);
+    for _ in 0..2 {
+        mod_double_inplace_fast(b, &hi, p);
+    }
+    mod_add_qq_fast(b, acc, &hi, p);
+    for _ in 0..4 {
+        mod_double_inplace_fast(b, &hi, p);
+    }
+    mod_sub_qq_fast(b, acc, &hi, p);
+    let (spill, flag_inv, ovf) = mod_shift_left_by_k_lowq(b, &hi, p, 22);
+    mod_sub_qq(b, acc, &hi, p);
+    mod_shift_right_by_k_lowq(b, &hi, p, 22, spill, flag_inv, ovf);
+    for _ in 0..10 {
+        mod_halve_inplace_fast(b, &hi, p);
+    }
+
+    schoolbook_square_symmetric_inverse(b, x, &tmp_ext);
+    b.free_vec(&tmp_ext);
+}
+
 /// Schoolbook: tmp_ext (2n bits) += x * x. Each row i adds (x[i] AND x)
 /// shifted by i, captured in n+1 bits to absorb carry into position i+n.
 fn schoolbook_square_into(b: &mut B, x: &[QubitId], tmp_ext: &[QubitId]) {
@@ -4185,7 +4369,7 @@ fn mulmod(a: U256, b: U256, p: U256) -> U256 {
 /// (since max(r,s) doubles per iter starting from max=1, so max ≤ 2^iter_idx).
 /// In that range, mod_double(r)'s Solinas cadd is identity — replace with
 /// a plain shift (0 Toffoli) for ~255 CCX savings per iter.
-const R_SMALL_THRESHOLD: usize = 257;
+const R_SMALL_THRESHOLD: usize = 259;
 
 fn r_small_threshold() -> usize {
     std::env::var("KAL_R_SMALL_THRESHOLD")
@@ -4203,7 +4387,7 @@ fn r_small_threshold() -> usize {
 /// `2^256`. Termination requires reaching `(1, 0)`, i.e. `s = 1`, so any run
 /// needs at least `ceil(log2(s0)) = 256` steps. Therefore the first 256 step
 /// entries are guaranteed bulk / nonterminal.
-const BULK_PREFIX_SAFE_ITERS: usize = 375;
+const BULK_PREFIX_SAFE_ITERS: usize = 377;
 
 fn bulk_prefix_safe_iters() -> usize {
     let centered_roundtrip_hook = std::env::var("BY_CENTERED_CLEAN_ROUNDTRIP_BENCH").ok().as_deref() == Some("1")
@@ -4393,6 +4577,13 @@ fn by_signed_controlled_sub_for_bench(b: &mut B, acc: &[QubitId], a: &[QubitId],
 }
 
 fn by_twos_cneg_for_bench(b: &mut B, v: &[QubitId], ctrl: QubitId) {
+    if std::env::var("BY_CENTERED_REPLAY_DIRECTFAST_CNEG").ok().as_deref() == Some("1") {
+        for &q in v {
+            b.cx(ctrl, q);
+        }
+        cadd_nbit_const_direct_fast(b, v, U256::from(1u64), ctrl);
+        return;
+    }
     for &q in v {
         b.cx(ctrl, q);
     }
@@ -4407,6 +4598,7 @@ fn by_arithmetic_shift_right_even_for_bench(b: &mut B, v: &[QubitId]) {
 }
 
 fn by_centered_halve_live_parity_for_bench(b: &mut B, v: &[QubitId], parity: QubitId, p: U256) {
+    let directfast = std::env::var("BY_CENTERED_REPLAY_DIRECTFAST_HALVE").ok().as_deref() == Some("1");
     let sign_hist = b.alloc_qubit();
     let add_ctrl = b.alloc_qubit();
     let sub_ctrl = b.alloc_qubit();
@@ -4416,8 +4608,13 @@ fn by_centered_halve_live_parity_for_bench(b: &mut B, v: &[QubitId], parity: Qub
     b.x(sign_hist);
     b.ccx(parity, sign_hist, sub_ctrl);
     b.x(sign_hist);
-    cadd_nbit_const_fast(b, v, p, add_ctrl);
-    csub_nbit_const_fast(b, v, p, sub_ctrl);
+    if directfast {
+        cadd_nbit_const_direct_fast(b, v, p, add_ctrl);
+        csub_nbit_const_direct_fast(b, v, p, sub_ctrl);
+    } else {
+        cadd_nbit_const_fast(b, v, p, add_ctrl);
+        csub_nbit_const_fast(b, v, p, sub_ctrl);
+    }
     b.x(sign_hist);
     b.ccx(parity, sign_hist, sub_ctrl);
     b.x(sign_hist);
@@ -4439,12 +4636,27 @@ fn centered_signed_by_microstep_for_bench(
     parity: QubitId,
     p: U256,
 ) {
+    let exact_cneg = std::env::var("BY_CENTERED_REPLAY_EXACT_CNEG").ok().as_deref() == Some("1");
+    let exact_add = std::env::var("BY_CENTERED_REPLAY_EXACT_ADD").ok().as_deref() == Some("1");
+    let exact_halve = std::env::var("BY_CENTERED_REPLAY_EXACT_HALVE").ok().as_deref() == Some("1");
     for i in 0..r.len() {
         cswap(b, a, r[i], s[i]);
     }
-    by_twos_cneg_for_bench(b, s, a);
-    by_signed_controlled_add_for_bench(b, s, r, odd);
-    by_centered_halve_live_parity_for_bench(b, s, parity, p);
+    if exact_cneg {
+        by_twos_cneg_exact_for_bench(b, s, a);
+    } else {
+        by_twos_cneg_for_bench(b, s, a);
+    }
+    if exact_add {
+        by_signed_controlled_add_exact_for_bench(b, s, r, odd);
+    } else {
+        by_signed_controlled_add_for_bench(b, s, r, odd);
+    }
+    if exact_halve {
+        by_centered_halve_live_parity_exact_for_bench(b, s, parity, p);
+    } else {
+        by_centered_halve_live_parity_for_bench(b, s, parity, p);
+    }
 }
 
 fn by_signed_controlled_add_exact_for_bench(b: &mut B, acc: &[QubitId], a: &[QubitId], ctrl: QubitId) {
@@ -5133,6 +5345,130 @@ fn emit_centered_signed_by_fast_clean_roundtrip_benchmark_scaffold(b: &mut B, p:
         }
     }
     let _ = (odd, a_ctrl, parity, r, s);
+}
+
+fn init_small_const_reg(b: &mut B, reg: &[QubitId], value: u64) {
+    for (i, &q) in reg.iter().enumerate() {
+        if ((value >> i) & 1) != 0 {
+            b.x(q);
+        }
+    }
+}
+
+fn emit_single_inv_strategy_c_shape_benchmark_scaffold(b: &mut B, p: U256) {
+    // Hardest-piece-first probe for the one-division family. This is not a
+    // point-add replacement; it is a clean shape benchmark for a Strategy-C-like
+    // scaffold: one inversion on dx^3, plus the surrounding square/multiply
+    // chain that a real one-DIV path would need to carry.
+    const ITERS: usize = 404;
+    let lowq_unv_square = std::env::var("SINGLE_INV_C_LOWQ_UNV_SQUARE").ok().as_deref() == Some("1");
+    let lowq_undx2 = std::env::var("SINGLE_INV_C_LOWQ_UNDX2").ok().as_deref() == Some("1");
+    let skip_ry = std::env::var("SINGLE_INV_C_SKIP_RY").ok().as_deref() == Some("1");
+    b.set_phase("single_inv_c_shape_alloc");
+    let dx = b.alloc_qubits(N);
+    let dy = b.alloc_qubits(N);
+    let dx2 = b.alloc_qubits(N);
+    let w = b.alloc_qubits(N);
+    init_small_const_reg(b, &dx, 3);
+    init_small_const_reg(b, &dy, 5);
+
+    b.set_phase("single_inv_c_shape_dx2");
+    squaring_add_to_acc_schoolbook(b, &dx2, &dx, p);
+    b.set_phase("single_inv_c_shape_w");
+    mod_mul_write_into_zero_acc_schoolbook(b, &w, &dx2, &dx, p);
+
+    b.set_phase("single_inv_c_shape_inv");
+    with_kal_inv_raw(b, &w, p, ITERS, |b, inv_raw| {
+        let v = b.alloc_qubits(N);
+        let dx_winv = b.alloc_qubits(N);
+        let rx = b.alloc_qubits(N);
+
+        b.set_phase("single_inv_c_shape_v_seed_square");
+        squaring_add_to_acc_schoolbook(b, &v, &dy, p);
+
+        b.set_phase("single_inv_c_shape_v_add_mul");
+        mod_mul_add_into_acc_schoolbook(b, &v, &dx2, &dy, p);
+
+        b.set_phase("single_inv_c_shape_dx_winv");
+        mod_mul_write_into_zero_acc_schoolbook(b, &dx_winv, &dx, inv_raw, p);
+
+        b.set_phase("single_inv_c_shape_rx");
+        mod_mul_write_into_zero_acc_schoolbook(b, &rx, &v, &dx_winv, p);
+
+        b.set_phase("single_inv_c_shape_unrx");
+        mod_mul_sub_qq(b, &rx, &v, &dx_winv, p);
+        b.set_phase("single_inv_c_shape_undx_winv");
+        mod_mul_sub_qq(b, &dx_winv, &dx, inv_raw, p);
+
+        if !skip_ry {
+            let core = b.alloc_qubits(N);
+            let ry = b.alloc_qubits(N);
+            b.set_phase("single_inv_c_shape_core");
+            mod_mul_write_into_zero_acc_schoolbook(b, &core, &dx2, &dy, p);
+            b.set_phase("single_inv_c_shape_ry");
+            mod_mul_write_into_zero_acc_schoolbook(b, &ry, &core, inv_raw, p);
+            b.set_phase("single_inv_c_shape_unry");
+            mod_mul_sub_qq(b, &ry, &core, inv_raw, p);
+            b.set_phase("single_inv_c_shape_uncore");
+            mod_mul_sub_qq(b, &core, &dx2, &dy, p);
+            b.free_vec(&ry);
+            b.free_vec(&core);
+        }
+
+        b.set_phase("single_inv_c_shape_unv_mul");
+        mod_mul_sub_qq(b, &v, &dx2, &dy, p);
+        b.set_phase("single_inv_c_shape_unv_square");
+        if lowq_unv_square {
+            squaring_sub_from_acc_schoolbook_lowq_shift22(b, &v, &dy, p);
+        } else {
+            squaring_sub_from_acc_schoolbook(b, &v, &dy, p);
+        }
+
+        b.free_vec(&v);
+    });
+
+    if std::env::var("SINGLE_INV_C_FREE_DY_AFTER_BODY").ok().as_deref() == Some("1") {
+        init_small_const_reg(b, &dy, 5);
+        b.free_vec(&dy);
+    }
+
+    b.set_phase("single_inv_c_shape_unw");
+    mod_mul_sub_qq(b, &w, &dx2, &dx, p);
+    b.set_phase("single_inv_c_shape_undx2");
+    if lowq_undx2 {
+        squaring_sub_from_acc_schoolbook_lowq_shift22(b, &dx2, &dx, p);
+    } else {
+        squaring_sub_from_acc_schoolbook(b, &dx2, &dx, p);
+    }
+
+    init_small_const_reg(b, &dy, 5);
+    init_small_const_reg(b, &dx, 3);
+    b.set_phase("single_inv_c_shape_free");
+    b.free_vec(&w);
+    b.free_vec(&dx2);
+    b.free_vec(&dy);
+    b.free_vec(&dx);
+}
+
+fn emit_centered_restoring_qbit_benchmark_scaffold(b: &mut B) {
+    const WIDTH: usize = 256;
+    b.set_phase("centered_restoring_qbit_alloc");
+    let u = b.alloc_qubits(WIDTH);
+    let v = b.alloc_qubits(WIDTH);
+    let q = b.alloc_qubit();
+    init_small_const_reg(b, &u, 9);
+    init_small_const_reg(b, &v, 5);
+    b.set_phase("centered_restoring_qbit_trial");
+    centered_restoring_trial_subtract_clean(b, &u, &v, q);
+    b.set_phase("centered_restoring_qbit_free");
+    // This scaffold uses fixed constants with a known successful trial, so
+    // return the observed quotient bit to |0> before freeing it.
+    b.x(q);
+    b.free(q);
+    init_small_const_reg(b, &v, 5);
+    init_small_const_reg(b, &u, 9);
+    b.free_vec(&v);
+    b.free_vec(&u);
 }
 
 fn by_copy_signed_mod_p_for_bench(b: &mut B, signed: &[QubitId], out: &[QubitId], p: U256) {
@@ -8336,9 +8672,9 @@ fn build_standard_point_add(
     // algebra probe with an iteration-threshold phase cliff.  Env overrides are
     // for approximate-correctness threshold research only; default remains the
     // exact checked setting.  For the normal exact path, full-harness probes
-    // after the R_SMALL_THRESHOLD=257 / pair1=404 updates found pair2=401
-    // clean and pair2=400 phase-unsafe.
-    let pair2_default = if tagged_div_validate || pair2_branch_inv { 404 } else { 401 };
+    // after the R_SMALL_THRESHOLD=259 update found pair2=400 clean; pair2=399
+    // remains outside the verified safety margin.
+    let pair2_default = if tagged_div_validate || pair2_branch_inv { 404 } else { 400 };
     let pair2_iters = std::env::var("KAL_PAIR2_ITERS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
@@ -8787,6 +9123,12 @@ pub fn build() -> Vec<Op> {
     }
     if std::env::var("BY_CENTERED_LIVE_NUM_BENCH").ok().as_deref() == Some("1") {
         emit_centered_by_denom_controls_live_numerator_benchmark_scaffold(b, &tx, &ty, p);
+    }
+    if std::env::var("SINGLE_INV_STRATEGY_C_BENCH").ok().as_deref() == Some("1") {
+        emit_single_inv_strategy_c_shape_benchmark_scaffold(b, p);
+    }
+    if std::env::var("CENTERED_RESTORING_QBIT_BENCH").ok().as_deref() == Some("1") {
+        emit_centered_restoring_qbit_benchmark_scaffold(b);
     }
 
     if std::env::var("BY_TEST").is_ok() {

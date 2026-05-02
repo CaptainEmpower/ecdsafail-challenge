@@ -42,7 +42,7 @@ Going forward, a route is not allowed to stay "active" merely because some subco
 Current exact default remains clean at roughly:
 
 ```text
-avg_toffoli = 4,089,274
+avg_toffoli = 4,082,910
 qubits      = 2,713
 scratch beyond tx,ty = 2,201
 ```
