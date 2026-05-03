@@ -10881,6 +10881,10 @@ mod tests {
         let mut exact_norm_costs_static = Vec::with_capacity(samples);
         let mut exact_norm_rem_costs = Vec::with_capacity(samples);
         let mut exact_norm_coeff_costs = Vec::with_capacity(samples);
+        let mut counts = Vec::with_capacity(samples);
+        let mut digit_payloads = Vec::with_capacity(samples);
+        let mut raw_digit_scratches = Vec::with_capacity(samples);
+        let mut normflag_scratches = Vec::with_capacity(samples);
         let mut norm_once_sum = 0i128;
         let mut norm_split_sum = 0i128;
         let mut exact_norm_once_sum = 0i128;
@@ -11022,6 +11026,10 @@ mod tests {
             exact_norm_costs_static.push(exact_norm_coeff_cost + exact_norm_rem_cost);
             exact_norm_rem_costs.push(exact_norm_rem_cost);
             exact_norm_coeff_costs.push(exact_norm_coeff_cost);
+            counts.push(count);
+            digit_payloads.push(digit_payload);
+            raw_digit_scratches.push(n + digit_payload);
+            normflag_scratches.push(n + digit_payload + norm_count);
         }
         base_inline_3x.sort_unstable();
         norm_once_static.sort_unstable();
@@ -11035,6 +11043,10 @@ mod tests {
         exact_norm_costs_static.sort_unstable();
         exact_norm_rem_costs.sort_unstable();
         exact_norm_coeff_costs.sort_unstable();
+        counts.sort_unstable();
+        digit_payloads.sort_unstable();
+        raw_digit_scratches.sort_unstable();
+        normflag_scratches.sort_unstable();
         let p99 = samples * 99 / 100;
         let base_p99 = base_inline_3x[p99];
         let norm_once_p99 = norm_once_static[p99];
@@ -11043,6 +11055,14 @@ mod tests {
         let exact_norm_split_p99 = exact_norm_split_static[p99];
         let norm_count_p99 = norm_counts[p99];
         let norm_count_max = *norm_counts.last().unwrap();
+        let count_p99 = counts[p99];
+        let count_max = *counts.last().unwrap();
+        let digit_payload_p99 = digit_payloads[p99];
+        let digit_payload_max = *digit_payloads.last().unwrap();
+        let raw_digit_scratch_p99 = raw_digit_scratches[p99];
+        let normflag_scratch_p99 = normflag_scratches[p99];
+        let normflag_scratch_max = *normflag_scratches.last().unwrap();
+        let normflag_scratch_gap_google = normflag_scratch_p99 as isize - 663isize;
         let norm_cost_p99 = norm_costs_static[p99];
         let norm_rem_p99 = norm_rem_costs[p99];
         let norm_coeff_p99 = norm_coeff_costs[p99];
@@ -11076,6 +11096,14 @@ mod tests {
         println!("METRIC centered_direct_signnorm_base_inline3x_p99={base_p99}");
         println!("METRIC centered_direct_signnorm_count_p99={norm_count_p99}");
         println!("METRIC centered_direct_signnorm_count_max={norm_count_max}");
+        println!("METRIC centered_direct_signnorm_euclid_count_p99={count_p99}");
+        println!("METRIC centered_direct_signnorm_euclid_count_max={count_max}");
+        println!("METRIC centered_direct_signnorm_digit_payload_p99={digit_payload_p99}");
+        println!("METRIC centered_direct_signnorm_digit_payload_max={digit_payload_max}");
+        println!("METRIC centered_direct_signnorm_raw_digit_scratch_p99={raw_digit_scratch_p99}");
+        println!("METRIC centered_direct_signnorm_normflag_scratch_p99={normflag_scratch_p99}");
+        println!("METRIC centered_direct_signnorm_normflag_scratch_max={normflag_scratch_max}");
+        println!("METRIC centered_direct_signnorm_normflag_scratch_gap_google={normflag_scratch_gap_google}");
         println!("METRIC centered_direct_signnorm_cost_p99={norm_cost_p99}");
         println!("METRIC centered_direct_signnorm_rem_cost_p99={norm_rem_p99}");
         println!("METRIC centered_direct_signnorm_coeff_cost_p99={norm_coeff_p99}");
@@ -11107,7 +11135,7 @@ mod tests {
         println!("METRIC centered_direct_signnorm_exact_once_first64_gap_to_2700k={exact_norm_once_first64_gap}");
         println!("METRIC centered_direct_signnorm_exact_split_first64_gap_to_2700k={exact_norm_split_first64_gap}");
         eprintln!(
-            "Direct-centered sign-normalized inline budget: cneg257={cneg257}, cneg258={cneg258}, exact_cneg257={exact_cneg257}, exact_cneg258={exact_cneg258}, base3x_p99={base_p99}, norm_count_p99={norm_count_p99}, norm_count_max={norm_count_max}, norm_cost_p99={norm_cost_p99}, rem_p99={norm_rem_p99}, coeff_p99={norm_coeff_p99}, once_p99={norm_once_p99}, split_p99={norm_split_p99}, once_gap={norm_once_gap}, split_gap={norm_split_gap}, split_mean={norm_split_mean}, split_first64={norm_split_first64}, exact_split_p99={exact_norm_split_p99}, exact_split_gap={exact_norm_split_gap}, exact_split_mean={exact_norm_split_mean}, exact_split_first64={exact_norm_split_first64}"
+            "Direct-centered sign-normalized inline budget: cneg257={cneg257}, cneg258={cneg258}, exact_cneg257={exact_cneg257}, exact_cneg258={exact_cneg258}, base3x_p99={base_p99}, count_p99={count_p99}, digit_payload_p99={digit_payload_p99}, norm_count_p99={norm_count_p99}, norm_count_max={norm_count_max}, normflag_scratch_p99={normflag_scratch_p99}, norm_cost_p99={norm_cost_p99}, rem_p99={norm_rem_p99}, coeff_p99={norm_coeff_p99}, once_p99={norm_once_p99}, split_p99={norm_split_p99}, once_gap={norm_once_gap}, split_gap={norm_split_gap}, split_mean={norm_split_mean}, split_first64={norm_split_first64}, exact_split_p99={exact_norm_split_p99}, exact_split_gap={exact_norm_split_gap}, exact_split_mean={exact_norm_split_mean}, exact_split_first64={exact_norm_split_first64}"
         );
         assert!(norm_count_p99 > 0, "sign normalization never fired on sampled traces");
         assert!(norm_once_gap < 0, "single-pass sign normalization budget stopped fitting");
@@ -11130,6 +11158,14 @@ mod tests {
         assert!(
             exact_norm_split_first64_gap < 0,
             "first-64 exact-cneg split sign normalization stopped fitting the harness objective"
+        );
+        assert!(
+            raw_digit_scratch_p99 <= 663,
+            "raw sign-normalized digit stream stopped fitting Google scratch before norm flags"
+        );
+        assert!(
+            normflag_scratch_gap_google > 0,
+            "normalization flags fit Google scratch without compression; promote signnorm implementation"
         );
     }
 
