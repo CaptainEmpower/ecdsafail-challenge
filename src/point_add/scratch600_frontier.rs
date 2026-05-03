@@ -115,7 +115,7 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
             name: "direct_centered_restoring_final_raw_digits",
             scratch_bits: 618,
             charged_toffoli: None,
-            blocker: "restoring-final model is under 2.7M and phase-clean in toy; fast semantic inverse cleans toy at 632 CCX, but generic payload MBU is dense and production parser is unwired",
+            blocker: "restoring-final model is under 2.7M and phase-clean in toy; fast semantic inverse cleans toy at 632 CCX, generic payload MBU is dense, exact reverse q recovery is collision-free in toy, charged decoder unwired",
         },
         Candidate {
             name: "direct_centered_signnorm_rank_compressed_signs",
@@ -240,6 +240,10 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
     let direct_restoring_final_payload_mbu_degree_n14 = 13usize;
     let direct_restoring_final_payload_mbu_density_n14 = 8_284usize;
     let direct_restoring_final_payload_max_n14 = 26usize;
+    let direct_restoring_final_reverse_q_collisions_n14 = 0usize;
+    let direct_restoring_final_reverse_q_states_n14 = 89_008usize;
+    let direct_restoring_final_reverse_q_total_steps_n14 = 89_008usize;
+    let direct_restoring_final_reverse_q_max_mult_n14 = 1usize;
     let plusminus_raw_scratch = 564usize;
     let plusminus_unary_scratch_p99 = 640usize;
     let plusminus_parser_over_strict = plusminus_unary_scratch_p99 - STRICT_SCRATCH;
@@ -411,6 +415,10 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
     println!("METRIC scratch600_direct_restoring_final_payload_mbu_degree_n14={direct_restoring_final_payload_mbu_degree_n14}");
     println!("METRIC scratch600_direct_restoring_final_payload_mbu_density_n14={direct_restoring_final_payload_mbu_density_n14}");
     println!("METRIC scratch600_direct_restoring_final_payload_max_n14={direct_restoring_final_payload_max_n14}");
+    println!("METRIC scratch600_direct_restoring_final_reverse_q_collisions_n14={direct_restoring_final_reverse_q_collisions_n14}");
+    println!("METRIC scratch600_direct_restoring_final_reverse_q_states_n14={direct_restoring_final_reverse_q_states_n14}");
+    println!("METRIC scratch600_direct_restoring_final_reverse_q_total_steps_n14={direct_restoring_final_reverse_q_total_steps_n14}");
+    println!("METRIC scratch600_direct_restoring_final_reverse_q_max_mult_n14={direct_restoring_final_reverse_q_max_mult_n14}");
     println!("METRIC scratch600_plusminus_raw_scratch_bits={plusminus_raw_scratch}");
     println!("METRIC scratch600_plusminus_unary_scratch_p99={plusminus_unary_scratch_p99}");
     println!("METRIC scratch600_plusminus_parser_over_strict_bits={plusminus_parser_over_strict}");
@@ -552,6 +560,13 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
             && direct_restoring_final_payload_mbu_density_n14 > (1usize << 14) / 4
             && direct_restoring_final_payload_max_n14 > 14,
         "restoring-final payload MBU toy result changed; revisit parser shortcut"
+    );
+    assert!(
+        direct_restoring_final_reverse_q_collisions_n14 == 0
+            && direct_restoring_final_reverse_q_states_n14
+                == direct_restoring_final_reverse_q_total_steps_n14
+            && direct_restoring_final_reverse_q_max_mult_n14 == 1,
+        "restoring-final reverse q recovery changed; revisit no-payload decoder route"
     );
     assert!(halfgcd_tail_over_google > 0, "half-GCD checkpoint must be fused before it fits");
     assert!(

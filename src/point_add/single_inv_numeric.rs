@@ -15065,6 +15065,34 @@ mod tests {
     }
 
     #[test]
+    fn direct_centered_restoring_final_reverse_image_recovers_quotient_on_exact_traces() {
+        // Stronger than the generic payload-MBU check: on the exact
+        // extended-Euclid image, the reverse-visible state identifies the
+        // previous quotient.  This does not yet give a cheap recovery circuit,
+        // but it means the restoring-final route may be able to trade stored
+        // digit payload for an integrated reverse quotient decoder.
+        let cases = [(8usize, 251u16), (10, 1021), (12, 4093), (14, 16381)];
+        for &(n, p) in &cases {
+            let (collisions, total_steps, states, max_mult) =
+                direct_centered_restoring_final_reverse_q_collision_stats(p);
+            eprintln!(
+                "direct-centered restoring-final reverse q recovery: n={n}, collisions={collisions}, states={states}, total_steps={total_steps}, max_mult={max_mult}"
+            );
+            if n == 14 {
+                println!("METRIC centered_direct_restoring_final_reverse_q_collisions_n14={collisions}");
+                println!("METRIC centered_direct_restoring_final_reverse_q_states_n14={states}");
+                println!("METRIC centered_direct_restoring_final_reverse_q_total_steps_n14={total_steps}");
+                println!("METRIC centered_direct_restoring_final_reverse_q_max_mult_n14={max_mult}");
+            }
+            assert_eq!(
+                collisions, 0,
+                "restoring-final quotient is not uniquely recoverable from reverse-visible state"
+            );
+            assert_eq!(max_mult, 1, "restoring-final reverse image multiplicity appeared");
+        }
+    }
+
+    #[test]
     fn direct_centered_signnorm_normalization_sign_mbu_is_dense_too() {
         // The sign-normalized direct-centered route keeps quotient signs on the
         // phase-clean q_neg=false path by recording when the centered remainder
@@ -15558,6 +15586,46 @@ mod tests {
             .map(|mask| mask.count_ones() as usize)
             .max()
             .unwrap_or(0);
+        (collisions, total_steps, image.len(), max_mult)
+    }
+
+    fn direct_centered_restoring_final_reverse_q_collision_stats(
+        p: u16,
+    ) -> (usize, usize, usize, usize) {
+        use std::collections::{BTreeMap, BTreeSet};
+        let mut image: BTreeMap<(usize, i128, i128, i128, i128), BTreeSet<i128>> =
+            BTreeMap::new();
+        let mut total_steps = 0usize;
+        for x in 1..p {
+            let mut u = p as i128;
+            let mut v = x as i128;
+            let mut coeff_u = 0i128;
+            let mut coeff_v = 1i128;
+            let mut step = 0usize;
+            while v != 0 {
+                let abs_u = u.unsigned_abs();
+                let abs_v = v.unsigned_abs();
+                let adjusted = abs_u + (abs_v >> 1);
+                let q_mag = (adjusted / abs_v) as i128;
+                let q_signed = if (u < 0) ^ (v < 0) { -q_mag } else { q_mag };
+                let next_v = u - q_signed * v;
+                let next_coeff_v = coeff_u - q_signed * coeff_v;
+                if next_v != 0 {
+                    image
+                        .entry((step, v, next_v, coeff_v, next_coeff_v))
+                        .or_default()
+                        .insert(q_signed);
+                    total_steps += 1;
+                }
+                u = v;
+                v = next_v;
+                coeff_u = coeff_v;
+                coeff_v = next_coeff_v;
+                step += 1;
+            }
+        }
+        let collisions = image.values().filter(|qs| qs.len() > 1).count();
+        let max_mult = image.values().map(|qs| qs.len()).max().unwrap_or(0);
         (collisions, total_steps, image.len(), max_mult)
     }
 
