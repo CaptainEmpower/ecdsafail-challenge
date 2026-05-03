@@ -9785,6 +9785,32 @@ mod tests {
     }
 
     #[test]
+    fn direct_centered_signed_digit_payload_mbu_is_dense_too() {
+        // The average width-tapered ledger only maps to the harness metric if
+        // the active signed-digit work can be driven by phase-clean classical
+        // controls.  Generic MBUC measurement of the direct-centered
+        // non-restoring digit stream is not that primitive: even the xor of the
+        // signed digit bits plus final correction bits is dense on toy fields.
+        let cases = [(8usize, 251u16), (10, 1021), (12, 4093), (14, 16381)];
+        for &(n, p) in &cases {
+            let (degree, density, max_digit_payload) =
+                direct_centered_signed_digit_payload_parity_anf_stats(n, p);
+            let table = 1usize << n;
+            eprintln!(
+                "direct-centered signed digit payload parity ANF: n={n}, degree={degree}, density={density}/{table}, max_digit_payload={max_digit_payload}"
+            );
+            if n == 14 {
+                println!("METRIC centered_direct_signed_digit_mbu_degree_n14={degree}");
+                println!("METRIC centered_direct_signed_digit_mbu_density_n14={density}");
+                println!("METRIC centered_direct_signed_digit_payload_max_n14={max_digit_payload}");
+            }
+            assert!(max_digit_payload > n, "toy field stopped exercising multi-digit payloads");
+            assert!(degree + 1 >= n, "signed digit payload parity unexpectedly low degree");
+            assert!(density > table / 4, "signed digit payload parity unexpectedly sparse");
+        }
+    }
+
+    #[test]
     fn euclid_quotient_stream_entropy_also_exceeds_scratch600() {
         // Follow-up to the raw-payload quotient-stream DIV test.  The tempting
         // objection is that a clever prefix/arithmetic code could pack the
@@ -10028,6 +10054,80 @@ mod tests {
             .max()
             .unwrap_or(0);
         (degree, density, max_final_count)
+    }
+
+    fn direct_centered_nonrestoring_digit_parity_for_toy(numer: u128, denom: u128) -> (u8, usize) {
+        assert!(denom != 0);
+        if numer == 0 {
+            return (0, 1);
+        }
+        let n_bits = 128usize - numer.leading_zeros() as usize;
+        let d_bits = 128usize - denom.leading_zeros() as usize;
+        let top = n_bits.saturating_sub(d_bits);
+        let mut rem = numer as i128;
+        let mut parity = 0u8;
+        let mut digits = 0usize;
+        for sh in (0..=top).rev() {
+            let sign = rem < 0;
+            parity ^= sign as u8;
+            let term = (denom << sh) as i128;
+            if sign {
+                rem += term;
+            } else {
+                rem -= term;
+            }
+            digits += 1;
+        }
+        if rem < 0 {
+            parity ^= 1;
+        }
+        (parity, digits)
+    }
+
+    fn direct_centered_signed_digit_payload_parity_anf_stats(
+        n: usize,
+        p: u16,
+    ) -> (usize, usize, usize) {
+        let size = 1usize << n;
+        let mut anf = vec![0u8; size];
+        let mut max_digit_payload = 0usize;
+        for x in 1..p {
+            let mut u = p as i128;
+            let mut v = x as i128;
+            let mut parity = 0u8;
+            let mut digit_payload = 0usize;
+            while v != 0 {
+                let abs_u = u.unsigned_abs();
+                let abs_v = v.unsigned_abs();
+                let adjusted = abs_u + (abs_v >> 1);
+                let (digit_parity, digits) =
+                    direct_centered_nonrestoring_digit_parity_for_toy(adjusted, abs_v);
+                parity ^= digit_parity;
+                digit_payload += digits;
+                let q_mag = adjusted / abs_v;
+                let q_signed = if (u < 0) ^ (v < 0) { -(q_mag as i128) } else { q_mag as i128 };
+                let rem = u - q_signed * v;
+                u = v;
+                v = rem;
+            }
+            max_digit_payload = max_digit_payload.max(digit_payload);
+            anf[x as usize] = parity;
+        }
+        for bit in 0..n {
+            for idx in 0..size {
+                if (idx & (1usize << bit)) != 0 {
+                    anf[idx] ^= anf[idx ^ (1usize << bit)];
+                }
+            }
+        }
+        let density = anf.iter().filter(|&&c| c != 0).count();
+        let degree = anf
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &c)| if c != 0 { Some(i.count_ones() as usize) } else { None })
+            .max()
+            .unwrap_or(0);
+        (degree, density, max_digit_payload)
     }
 
     fn euclid_quotient_payload_parity_anf_stats(n: usize, p: u16) -> (usize, usize) {

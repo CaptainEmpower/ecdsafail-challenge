@@ -1860,6 +1860,14 @@ odd-divisor increment.  The toy extractor is phase-clean, but the cost is still
 point-add gap stays `+134,592`.  So the centered remainder form is semantically
 nice but not a gate saving with current primitives.
 
+The same generic-measurement warning applies to the active digit stream itself.
+`direct_centered_signed_digit_payload_mbu_is_dense_too` checks the parity of the
+direct-centered non-restoring signed digit bits plus final correction bits.  At
+toy `n=14` it reports degree `13`, density `8298/16384`, and max digit payload
+`28`.  Thus the average-metric opening cannot be realized by simply measuring
+the signed digit payload and driving the replay with those classical bits; it
+still needs a structural phase-clean parser/control mechanism.
+
 ## 6. Post-BY ground-up attempt: Strategy E slope-coordinate map
 
 New non-BY candidate: make the slope the live y-coordinate and avoid an
