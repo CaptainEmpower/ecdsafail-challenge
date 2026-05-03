@@ -3793,6 +3793,56 @@ mod tests {
     }
 
     #[test]
+    fn half_gcd_second_column_replay_matches_full_inverse() {
+        // The scratch win is only useful if the first column is genuinely
+        // unnecessary for the data row.  After the prefix, `(0,y)` transformed
+        // by the same quotient matrices is `(b*y,d*y)` modulo p; tail replay
+        // from the residual pair should then match the full Euclid quotient
+        // replay and satisfy r*x = y.
+        let p = SECP256K1_P;
+        let samples = 1024usize;
+        let mut rng = 0x5ec0_1ed6_0000_0001u64;
+        for _ in 0..samples {
+            let mut x = rand_u256(&mut rng);
+            if x.is_zero() { x = U256::from(1u64); }
+            let y = rand_u256(&mut rng);
+            let (full_r, full_s, _) = replay_euclid_quotient_division(x, y, p);
+
+            let mut u = p;
+            let mut v = x;
+            let mut b = smag_for_halfgcd_test(false, U512::ZERO);
+            let mut d = smag_for_halfgcd_test(false, U512::from(1u64));
+            while !v.is_zero() && u256_bit_len(u).max(u256_bit_len(v)) > 128 {
+                let q = u / v;
+                let rem = u - q * v;
+                let nb = d;
+                let nd = signed_sub_scaled_for_halfgcd_test(b, q, d);
+                u = v;
+                v = rem;
+                b = nb;
+                d = nd;
+            }
+
+            let mut r = signed_u512_mod_u256_for_centered_test(b, p).mul_mod(y, p);
+            let mut s = signed_u512_mod_u256_for_centered_test(d, p).mul_mod(y, p);
+            while !v.is_zero() {
+                let q = u / v;
+                let old_r = r;
+                r = s;
+                s = sub_mod(old_r, (q % p).mul_mod(s, p), p);
+                let rem = u - q * v;
+                u = v;
+                v = rem;
+            }
+            assert_eq!(u, U256::from(1u64), "tail replay did not finish at gcd 1");
+            assert_eq!(s, U256::ZERO, "tail replay left nonzero second lane");
+            assert_eq!(r, full_r, "second-column replay disagrees with full quotient replay");
+            assert_eq!(full_s, U256::ZERO, "full quotient replay left nonzero second lane");
+            assert_eq!(r.mul_mod(x, p), y % p, "second-column replay is not y/x");
+        }
+    }
+
+    #[test]
     fn half_gcd_second_column_prefix_width_ledger_has_lowqubit_margin() {
         // Now price the missing prefix extractor in the same optimistic
         // width-unit style used by the direct-centered ledgers: one fused
