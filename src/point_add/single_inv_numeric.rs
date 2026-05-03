@@ -4491,6 +4491,189 @@ mod tests {
     }
 
     #[test]
+    fn half_gcd_second_column_prefix_fixed_bound_active_toy_cleans_history() {
+        // Circuit-reality check for the next missing prefix-extractor piece.  A
+        // fixed-bound active schedule computes the bounded prefix output,
+        // including inactive trailing slots, then cleans the active flags and
+        // quotient histories by reversing the actual emitted forward ops.
+        use sha3::digest::{ExtendableOutput, Update};
+
+        const REM_W: usize = 11;
+        const DIV_W: usize = 4;
+        const COEFF_W: usize = 16;
+        const DIGITS: usize = 6;
+        const STEPS: usize = 4;
+        let raw_from_i64 = |x: i64| -> u64 {
+            ((x as i128) & ((1i128 << COEFF_W) - 1)) as u64
+        };
+        let i64_from_raw = |raw: u64| -> i64 {
+            let mask = (1u64 << COEFF_W) - 1;
+            let raw = raw & mask;
+            if (raw & (1u64 << (COEFF_W - 1))) != 0 {
+                raw as i64 - (1i64 << COEFF_W)
+            } else {
+                raw as i64
+            }
+        };
+
+        let mut b = super::super::B::new();
+        let u = b.alloc_qubits(REM_W);
+        let v = b.alloc_qubits(DIV_W);
+        let coeff_b = b.alloc_qubits(COEFF_W);
+        let coeff_d = b.alloc_qubits(COEFF_W);
+        let u_copy = b.alloc_qubits(REM_W);
+        let v_copy = b.alloc_qubits(DIV_W);
+        let b_copy = b.alloc_qubits(COEFF_W);
+        let d_copy = b.alloc_qubits(COEFF_W);
+        let digit_hist: Vec<Vec<_>> = (0..STEPS).map(|_| b.alloc_qubits(DIGITS)).collect();
+        let final_negative: Vec<_> = (0..STEPS).map(|_| b.alloc_qubit()).collect();
+        let active_hist: Vec<_> = (0..STEPS).map(|_| b.alloc_qubit()).collect();
+        let start = b.ops.len();
+        emit_toy_halfgcd_fixed_bound_active_prefix_for_centered_test(
+            &mut b,
+            &u,
+            &v,
+            &coeff_b,
+            &coeff_d,
+            &digit_hist,
+            &final_negative,
+            &active_hist,
+        );
+        let forward_end = b.ops.len();
+        for i in 0..REM_W {
+            b.cx(u[i], u_copy[i]);
+        }
+        for i in 0..DIV_W {
+            b.cx(v[i], v_copy[i]);
+        }
+        for i in 0..COEFF_W {
+            b.cx(coeff_b[i], b_copy[i]);
+            b.cx(coeff_d[i], d_copy[i]);
+        }
+        emit_inverse_of_existing_ops_for_centered_test(&mut b, start, forward_end);
+        let ccx = local_count_ccx_for_plusminus_cost(&b.ops[start..]);
+        let peak = b.peak_qubits;
+        let num_qubits = b.next_qubit as usize;
+        let num_bits = b.next_bit as usize;
+        let ops = b.ops;
+        let u_mask = (1u64 << REM_W) - 1;
+        let v_mask = (1u64 << DIV_W) - 1;
+        let coeff_mask = (1u64 << COEFF_W) - 1;
+        let mut active_slots = 0usize;
+        let mut inactive_slots = 0usize;
+        let mut halted_inputs = 0usize;
+        let mut full_bound_inputs = 0usize;
+        let mut dirty_restore_cases = 0usize;
+        let mut dirty_phase_cases = 0usize;
+        let mut dirty_history_cases = 0usize;
+        for v0 in 0u64..(1u64 << DIV_W) {
+            let u_limit = if v0 == 0 {
+                32
+            } else {
+                (v0 * (1u64 << DIGITS)).min(96)
+            };
+            for u0 in 0u64..u_limit {
+                for b0 in -3i64..=3i64 {
+                    for d0 in -2i64..=2i64 {
+                        let mut eu = u0;
+                        let mut ev = v0;
+                        let mut eb = b0;
+                        let mut ed = d0;
+                        let mut used_steps = 0usize;
+                        for _ in 0..STEPS {
+                            if ev == 0 {
+                                continue;
+                            }
+                            let q = (eu / ev) as i64;
+                            let rem = eu % ev;
+                            let nd = eb - q * ed;
+                            eu = ev;
+                            ev = rem;
+                            eb = ed;
+                            ed = nd;
+                            used_steps += 1;
+                        }
+                        active_slots += used_steps;
+                        inactive_slots += STEPS - used_steps;
+                        halted_inputs += (used_steps < STEPS) as usize;
+                        full_bound_inputs += (used_steps == STEPS) as usize;
+                        assert!(
+                            (-(1i64 << (COEFF_W - 1))..(1i64 << (COEFF_W - 1))).contains(&eb)
+                                && (-(1i64 << (COEFF_W - 1))..(1i64 << (COEFF_W - 1)))
+                                    .contains(&ed),
+                            "toy coefficient fixture overflowed"
+                        );
+
+                        let mut hasher = sha3::Shake128::default();
+                        hasher.update(b"halfgcd-second-column-fixed-bound-active-toy-v1");
+                        let mut xof = hasher.finalize_xof();
+                        let mut sim =
+                            crate::sim::Simulator::new(num_qubits, num_bits, &mut xof);
+                        set_slice_u512_pm(&mut sim, &u, U512::from(u0));
+                        set_slice_u512_pm(&mut sim, &v, U512::from(v0));
+                        set_slice_u512_pm(&mut sim, &coeff_b, U512::from(raw_from_i64(b0)));
+                        set_slice_u512_pm(&mut sim, &coeff_d, U512::from(raw_from_i64(d0)));
+                        sim.apply(&ops);
+
+                        let u_restored = get_slice_u512_pm(&sim, &u).as_limbs()[0] & u_mask;
+                        let v_restored = get_slice_u512_pm(&sim, &v).as_limbs()[0] & v_mask;
+                        let b_restored = i64_from_raw(
+                            get_slice_u512_pm(&sim, &coeff_b).as_limbs()[0] & coeff_mask,
+                        );
+                        let d_restored = i64_from_raw(
+                            get_slice_u512_pm(&sim, &coeff_d).as_limbs()[0] & coeff_mask,
+                        );
+                        let u_out = get_slice_u512_pm(&sim, &u_copy).as_limbs()[0] & u_mask;
+                        let v_out = get_slice_u512_pm(&sim, &v_copy).as_limbs()[0] & v_mask;
+                        let b_out = i64_from_raw(
+                            get_slice_u512_pm(&sim, &b_copy).as_limbs()[0] & coeff_mask,
+                        );
+                        let d_out = i64_from_raw(
+                            get_slice_u512_pm(&sim, &d_copy).as_limbs()[0] & coeff_mask,
+                        );
+                        assert_eq!(u_out, eu, "copied u mismatch u0={u0} v0={v0}");
+                        assert_eq!(v_out, ev, "copied v mismatch u0={u0} v0={v0}");
+                        assert_eq!(b_out, eb, "copied b mismatch u0={u0} v0={v0}");
+                        assert_eq!(d_out, ed, "copied d mismatch u0={u0} v0={v0}");
+                        let mut dirty_history = false;
+                        for step in 0..STEPS {
+                            dirty_history |=
+                                get_slice_u512_pm(&sim, &digit_hist[step]).as_limbs()[0] != 0;
+                            dirty_history |= (sim.qubit(final_negative[step]) & 1) != 0;
+                            dirty_history |= (sim.qubit(active_hist[step]) & 1) != 0;
+                        }
+                        let dirty_restore = u_restored != u0
+                            || v_restored != v0
+                            || b_restored != b0
+                            || d_restored != d0;
+                        dirty_restore_cases += dirty_restore as usize;
+                        dirty_history_cases += dirty_history as usize;
+                        dirty_phase_cases += ((sim.global_phase() & 1) != 0) as usize;
+                    }
+                }
+            }
+        }
+        println!("METRIC halfgcd_second_col_prefix_fixed_bound_active_toy_ccx={ccx}");
+        println!("METRIC halfgcd_second_col_prefix_fixed_bound_active_toy_peak_q={peak}");
+        println!("METRIC halfgcd_second_col_prefix_fixed_bound_active_toy_active_slots={active_slots}");
+        println!("METRIC halfgcd_second_col_prefix_fixed_bound_active_toy_inactive_slots={inactive_slots}");
+        println!("METRIC halfgcd_second_col_prefix_fixed_bound_active_toy_halted_inputs={halted_inputs}");
+        println!("METRIC halfgcd_second_col_prefix_fixed_bound_active_toy_full_bound_inputs={full_bound_inputs}");
+        println!("METRIC halfgcd_second_col_prefix_fixed_bound_active_toy_dirty_restore_cases={dirty_restore_cases}");
+        println!("METRIC halfgcd_second_col_prefix_fixed_bound_active_toy_dirty_history_cases={dirty_history_cases}");
+        println!("METRIC halfgcd_second_col_prefix_fixed_bound_active_toy_dirty_phase_cases={dirty_phase_cases}");
+        eprintln!(
+            "half-GCD second-column fixed-bound active toy: ccx={ccx}, peak={peak}, active_slots={active_slots}, inactive_slots={inactive_slots}, halted_inputs={halted_inputs}, full_bound_inputs={full_bound_inputs}, dirty_restore={dirty_restore_cases}, dirty_history={dirty_history_cases}, dirty_phase={dirty_phase_cases}"
+        );
+        assert!(active_slots > 0, "toy never exercised active prefix slots");
+        assert!(inactive_slots > 0, "toy never exercised inactive trailing slots");
+        assert!(halted_inputs > 0 && full_bound_inputs > 0, "toy did not cover both early stop and full bound");
+        assert_eq!(dirty_restore_cases, 0, "active bounded prefix failed to restore inputs");
+        assert_eq!(dirty_history_cases, 0, "active bounded prefix leaked history");
+        assert_eq!(dirty_phase_cases, 0, "active bounded prefix left phase");
+    }
+
+    #[test]
     fn half_gcd_second_column_schedule_removes_matrix_extraction_scratch_blocker() {
         // Unlike a determinant-compressed full matrix, the second column can be
         // generated and updated directly during the prefix loop.  Price the
@@ -6073,6 +6256,33 @@ mod tests {
         ops.iter()
             .filter(|o| matches!(o.kind, crate::circuit::OperationType::CCX | crate::circuit::OperationType::CCZ))
             .count()
+    }
+
+    fn emit_inverse_of_existing_ops_for_centered_test(
+        b: &mut super::super::B,
+        start: usize,
+        end: usize,
+    ) {
+        let fwd: Vec<_> = b.ops[start..end].to_vec();
+        for op in fwd.into_iter().rev() {
+            match op.kind {
+                crate::circuit::OperationType::X
+                | crate::circuit::OperationType::Z
+                | crate::circuit::OperationType::CX
+                | crate::circuit::OperationType::CZ
+                | crate::circuit::OperationType::CCX
+                | crate::circuit::OperationType::CCZ
+                | crate::circuit::OperationType::Swap => b.ops.push(op),
+                crate::circuit::OperationType::R
+                | crate::circuit::OperationType::Register
+                | crate::circuit::OperationType::AppendToRegister
+                | crate::circuit::OperationType::DebugPrint => {}
+                _ => panic!(
+                    "emit_inverse_of_existing_ops_for_centered_test: non-invertible op kind {:?}",
+                    op.kind
+                ),
+            }
+        }
     }
 
     fn local_cswap_for_plusminus_cost(
@@ -10926,6 +11136,32 @@ mod tests {
         b.free(nonnegative);
     }
 
+    fn emit_active_sign_controlled_addsub_digit_for_centered_test(
+        b: &mut super::super::B,
+        acc: &[super::super::QubitId],
+        shifted_v: &[super::super::QubitId],
+        active: super::super::QubitId,
+        sign_hist: super::super::QubitId,
+    ) {
+        assert_eq!(acc.len(), shifted_v.len());
+        let nonnegative = b.alloc_qubit();
+        let do_sub = b.alloc_qubit();
+        let do_add = b.alloc_qubit();
+        b.x(nonnegative);
+        b.cx(sign_hist, nonnegative);
+        b.ccx(active, nonnegative, do_sub);
+        b.ccx(active, sign_hist, do_add);
+        super::super::cucc_sub_ctrl(b, shifted_v, acc, do_sub);
+        super::super::cucc_add_ctrl(b, shifted_v, acc, do_add);
+        b.ccx(active, sign_hist, do_add);
+        b.ccx(active, nonnegative, do_sub);
+        b.cx(sign_hist, nonnegative);
+        b.x(nonnegative);
+        b.free(do_add);
+        b.free(do_sub);
+        b.free(nonnegative);
+    }
+
     fn emit_controlled_integer_add_coherent_for_centered_test(
         b: &mut super::super::B,
         acc: &[super::super::QubitId],
@@ -11271,6 +11507,112 @@ mod tests {
         b.free_vec(&shifted_v);
     }
 
+    fn emit_toy_halfgcd_active_floor_inline_coeff_for_centered_test(
+        b: &mut super::super::B,
+        rem: &[super::super::QubitId],
+        divisor: &[super::super::QubitId],
+        coeff_acc: &[super::super::QubitId],
+        coeff_v: &[super::super::QubitId],
+        digit_hist: &[super::super::QubitId],
+        final_negative: super::super::QubitId,
+        active: super::super::QubitId,
+    ) {
+        assert_eq!(digit_hist.len(), 6);
+        assert_eq!(rem.len(), 11);
+        assert_eq!(divisor.len(), 4);
+        assert_eq!(coeff_acc.len(), coeff_v.len());
+        let top_shift = digit_hist.len() - 1;
+        assert!(coeff_v.len() > top_shift);
+        let shifted_v = b.alloc_qubits(rem.len());
+        let shifted_cv = b.alloc_qubits(coeff_v.len());
+        for i in 0..divisor.len() {
+            b.cx(divisor[i], shifted_v[i + top_shift]);
+        }
+        for i in 0..coeff_v.len() - top_shift {
+            b.cx(coeff_v[i], shifted_cv[i + top_shift]);
+        }
+        for sh in (0..digit_hist.len()).rev() {
+            b.ccx(active, rem[rem.len() - 1], digit_hist[sh]);
+            emit_active_sign_controlled_addsub_digit_for_centered_test(
+                b,
+                rem,
+                &shifted_v,
+                active,
+                digit_hist[sh],
+            );
+            emit_active_sign_controlled_addsub_digit_for_centered_test(
+                b,
+                coeff_acc,
+                &shifted_cv,
+                active,
+                digit_hist[sh],
+            );
+            if sh != 0 {
+                emit_shift_right_1_nooverflow_for_centered_test(b, &shifted_v);
+                emit_arithmetic_shift_right_1_exact_for_centered_test(b, &shifted_cv);
+            }
+        }
+        b.ccx(active, rem[rem.len() - 1], final_negative);
+        emit_controlled_integer_add_coherent_for_centered_test(
+            b,
+            rem,
+            &shifted_v,
+            final_negative,
+            false,
+        );
+        emit_controlled_integer_add_coherent_for_centered_test(
+            b,
+            coeff_acc,
+            &shifted_cv,
+            final_negative,
+            false,
+        );
+        for i in (0..coeff_v.len()).rev() {
+            b.cx(coeff_v[i], shifted_cv[i]);
+        }
+        for i in (0..divisor.len()).rev() {
+            b.cx(divisor[i], shifted_v[i]);
+        }
+        b.free_vec(&shifted_cv);
+        b.free_vec(&shifted_v);
+    }
+
+    fn emit_toy_halfgcd_fixed_bound_active_prefix_for_centered_test(
+        b: &mut super::super::B,
+        u: &[super::super::QubitId],
+        v: &[super::super::QubitId],
+        coeff_b: &[super::super::QubitId],
+        coeff_d: &[super::super::QubitId],
+        digit_hist: &[Vec<super::super::QubitId>],
+        final_negative: &[super::super::QubitId],
+        active_hist: &[super::super::QubitId],
+    ) {
+        assert_eq!(digit_hist.len(), final_negative.len());
+        assert_eq!(digit_hist.len(), active_hist.len());
+        for step in 0..active_hist.len() {
+            super::super::cmp_eq_zero_into(b, v, active_hist[step]);
+            b.x(active_hist[step]);
+            emit_toy_halfgcd_active_floor_inline_coeff_for_centered_test(
+                b,
+                u,
+                v,
+                coeff_b,
+                coeff_d,
+                &digit_hist[step],
+                final_negative[step],
+                active_hist[step],
+            );
+            emit_toy_halfgcd_conditional_second_column_swap_for_centered_test(
+                b,
+                u,
+                v,
+                coeff_b,
+                coeff_d,
+                active_hist[step],
+            );
+        }
+    }
+
     fn emit_toy_halfgcd_floor_inline_coeff_inverse_for_centered_test(
         b: &mut super::super::B,
         rem: &[super::super::QubitId],
@@ -11341,6 +11683,24 @@ mod tests {
         }
         b.free_vec(&shifted_cv);
         b.free_vec(&shifted_v);
+    }
+
+    fn emit_toy_halfgcd_conditional_second_column_swap_for_centered_test(
+        b: &mut super::super::B,
+        u: &[super::super::QubitId],
+        v: &[super::super::QubitId],
+        coeff_b: &[super::super::QubitId],
+        coeff_d: &[super::super::QubitId],
+        active: super::super::QubitId,
+    ) {
+        assert!(u.len() >= v.len());
+        assert_eq!(coeff_b.len(), coeff_d.len());
+        for i in 0..v.len() {
+            super::super::cswap(b, active, u[i], v[i]);
+        }
+        for i in 0..coeff_b.len() {
+            super::super::cswap(b, active, coeff_b[i], coeff_d[i]);
+        }
     }
 
     fn emit_toy_direct_centered_nonrestoring_inline_coeff_restoring_final_for_centered_test(
