@@ -8785,6 +8785,44 @@ mod tests {
         b.free(nonnegative);
     }
 
+    fn emit_shift_right_1_nooverflow_for_centered_test(
+        b: &mut super::super::B,
+        v: &[super::super::QubitId],
+    ) {
+        for i in 0..v.len() - 1 {
+            b.swap(v[i], v[i + 1]);
+        }
+    }
+
+    fn emit_toy_direct_centered_nonrestoring_extractor_for_centered_test(
+        b: &mut super::super::B,
+        rem: &[super::super::QubitId],
+        divisor: &[super::super::QubitId],
+        digit_hist: &[super::super::QubitId],
+        final_negative: super::super::QubitId,
+    ) {
+        assert_eq!(digit_hist.len(), 6);
+        assert_eq!(rem.len(), 11);
+        assert_eq!(divisor.len(), 4);
+        let shifted_v = b.alloc_qubits(rem.len());
+        for i in 0..divisor.len() {
+            b.cx(divisor[i], shifted_v[i + 5]);
+        }
+        for sh in (0..digit_hist.len()).rev() {
+            b.cx(rem[rem.len() - 1], digit_hist[sh]);
+            emit_fused_sign_controlled_addsub_digit_for_centered_test(b, rem, &shifted_v, digit_hist[sh]);
+            if sh != 0 {
+                emit_shift_right_1_nooverflow_for_centered_test(b, &shifted_v);
+            }
+        }
+        b.cx(rem[rem.len() - 1], final_negative);
+        emit_controlled_integer_add_for_plusminus(b, rem, &shifted_v, final_negative, false);
+        for i in (0..divisor.len()).rev() {
+            b.cx(divisor[i], shifted_v[i]);
+        }
+        b.free_vec(&shifted_v);
+    }
+
     #[test]
     fn direct_centered_nonrestoring_current_signed_digit_primitive_kills_margin() {
         // The reopened direct-rounding ledger assumes each signed quotient
@@ -8903,6 +8941,85 @@ mod tests {
         assert_eq!(ccx65, 64, "fused digit no longer costs width-1 at 65 bits");
         assert_eq!(ccx257, 256, "fused digit no longer costs width-1 at 257 bits");
         assert!(gap < 0, "fused sign-controlled digit does not revive relaxed direct-centered route");
+    }
+
+    #[test]
+    fn direct_centered_nonrestoring_toy_packed_extractor_is_phase_clean() {
+        // Small fixed-boundary extractor for the direct-centered non-restoring
+        // route.  It copies d into an aligned scratch, streams six signed
+        // digits into packed history bits, shifts the scratch down to d, applies
+        // the final negative-remainder cleanup, and uncopies the denominator.
+        use sha3::digest::{ExtendableOutput, Update};
+
+        const REM_W: usize = 11;
+        const DIV_W: usize = 4;
+        const DIGITS: usize = 6;
+        let mut b = super::super::B::new();
+        let rem = b.alloc_qubits(REM_W);
+        let divisor = b.alloc_qubits(DIV_W);
+        let digit_hist = b.alloc_qubits(DIGITS);
+        let final_negative = b.alloc_qubit();
+        let start = b.ops.len();
+        emit_toy_direct_centered_nonrestoring_extractor_for_centered_test(
+            &mut b,
+            &rem,
+            &divisor,
+            &digit_hist,
+            final_negative,
+        );
+        let ccx = local_count_ccx_for_plusminus_cost(&b.ops[start..]);
+        let peak = b.peak_qubits;
+        let num_qubits = b.next_qubit as usize;
+        let num_bits = b.next_bit as usize;
+        let ops = b.ops;
+        let rem_mask = (1u64 << REM_W) - 1;
+        for d in 1u64..(1u64 << DIV_W) {
+            for n in 0u64..49u64 {
+                let adjusted = n + (d >> 1);
+                let mut hasher = sha3::Shake128::default();
+                hasher.update(b"direct-centered-toy-packed-extractor-v1");
+                let mut xof = hasher.finalize_xof();
+                let mut sim = crate::sim::Simulator::new(num_qubits, num_bits, &mut xof);
+                set_slice_u512_pm(&mut sim, &rem, U512::from(adjusted));
+                set_slice_u512_pm(&mut sim, &divisor, U512::from(d));
+                sim.apply(&ops);
+
+                let rem_out = get_slice_u512_pm(&sim, &rem).as_limbs()[0] & rem_mask;
+                let div_out = get_slice_u512_pm(&sim, &divisor).as_limbs()[0] & ((1u64 << DIV_W) - 1);
+                let hist = get_slice_u512_pm(&sim, &digit_hist).as_limbs()[0];
+                let mut q = 0i64;
+                for sh in 0..DIGITS {
+                    if ((hist >> sh) & 1) == 0 {
+                        q += 1i64 << sh;
+                    } else {
+                        q -= 1i64 << sh;
+                    }
+                }
+                if (sim.qubit(final_negative) & 1) != 0 {
+                    q -= 1;
+                }
+                assert_eq!(rem_out, adjusted % d, "remainder mismatch n={n} d={d}");
+                assert_eq!(q, (adjusted / d) as i64, "quotient mismatch n={n} d={d}");
+                assert_eq!(div_out, d, "divisor changed n={n} d={d}");
+                assert_eq!(sim.global_phase() & 1, 0, "unexpected phase n={n} d={d}");
+            }
+        }
+
+        let digit_payload_p99 = 397usize;
+        let count_p99 = 118usize;
+        let final_p99 = 69usize;
+        let replay_per_div = (digit_payload_p99 + final_p99) * 587usize;
+        let barrel_and_scan = count_p99 * (256usize * 8usize + 256usize);
+        let final_fix_current = count_p99 * (2usize * 256usize - 1usize);
+        let extraction_oneway = digit_payload_p99 * 256usize + barrel_and_scan + final_fix_current;
+        let pointadd = 642_716isize + 2 * (replay_per_div + 2 * extraction_oneway) as isize;
+        let gap = pointadd - 3_000_000isize;
+        println!("METRIC centered_direct_round_toy_extractor_ccx={ccx}");
+        println!("METRIC centered_direct_round_toy_extractor_peak_q={peak}");
+        println!("METRIC centered_direct_round_current_finalfix_gap_to_3m_ccx={gap}");
+        eprintln!("Centered direct-rounding toy packed extractor: ccx={ccx}, peak={peak}, current_finalfix_gap={gap}");
+        assert_eq!(ccx, DIGITS * (REM_W - 1) + (2 * REM_W - 1), "toy extractor primitive cost drifted");
+        assert!(gap < 0, "current final-fix primitive erases relaxed direct-centered margin");
     }
 
     #[test]

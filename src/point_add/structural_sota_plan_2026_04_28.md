@@ -1718,10 +1718,23 @@ phase cleanliness.  Measured cost:
 projected relaxed point-add gap = -195,352 CCX
 ```
 
-This revives the hard digit primitive, but it is still only a route candidate.
-The next promotion gate is a toy reversible packed extractor including
-shifted-divisor alignment, final-negative cleanup, denominator reverse,
-parser/boundary cleanup, and phase cleanliness.
+`direct_centered_nonrestoring_toy_packed_extractor_is_phase_clean` then builds
+the first extractor-level toy: fixed boundary, aligned divisor scratch,
+shift-down reuse, packed signed-digit history, final negative cleanup, divisor
+uncopy, and basis-simulator phase check.  The toy measures 81 CCX for six
+11-bit digits:
+
+```text
+six 11-bit toy extractor       = 81 CCX
+toy peak                       = 55 qubits
+full ledger with 2n-1 final fix = 2,925,008 CCX
+gap to 3M                      = -74,992 CCX
+```
+
+This promotes the direct-centered route from "digit primitive only" to
+"toy-extractor viable" under the current 2800q cap.  It is still not production
+ready: the missing hard piece is a real 256-bit packed extractor with dynamic
+boundary/parser cleanup and integration with coefficient replay.
 
 ## 6. Post-BY ground-up attempt: Strategy E slope-coordinate map
 
