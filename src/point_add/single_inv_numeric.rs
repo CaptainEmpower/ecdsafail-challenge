@@ -10514,50 +10514,15 @@ mod tests {
         b.free_vec(&gated);
     }
 
-    fn emit_fused_sign_controlled_addsub_digit_exact_for_centered_test(
-        b: &mut super::super::B,
-        rem: &[super::super::QubitId],
-        shifted_v: &[super::super::QubitId],
-        sign_hist: super::super::QubitId,
-    ) {
-        assert_eq!(rem.len(), shifted_v.len());
-        let nonnegative = b.alloc_qubit();
-        b.x(nonnegative);
-        b.cx(sign_hist, nonnegative);
-        for &q in shifted_v {
-            b.cx(nonnegative, q);
-        }
-        super::super::cuccaro_add(b, shifted_v, rem, nonnegative);
-        for &q in shifted_v.iter().rev() {
-            b.cx(nonnegative, q);
-        }
-        b.cx(sign_hist, nonnegative);
-        b.x(nonnegative);
-        b.free(nonnegative);
-    }
-
-    fn emit_active_fused_sign_controlled_addsub_digit_exact_for_centered_test(
+    fn emit_fused_sign_controlled_addsub_digit_opposite_for_centered_test(
         b: &mut super::super::B,
         acc: &[super::super::QubitId],
         shifted_v: &[super::super::QubitId],
-        active: super::super::QubitId,
         sign_hist: super::super::QubitId,
     ) {
-        assert_eq!(acc.len(), shifted_v.len());
-        let gated = b.alloc_qubits(shifted_v.len());
-        for i in 0..shifted_v.len() {
-            b.ccx(active, shifted_v[i], gated[i]);
-        }
-        emit_fused_sign_controlled_addsub_digit_exact_for_centered_test(
-            b,
-            acc,
-            &gated,
-            sign_hist,
-        );
-        for i in (0..shifted_v.len()).rev() {
-            b.ccx(active, shifted_v[i], gated[i]);
-        }
-        b.free_vec(&gated);
+        b.x(sign_hist);
+        emit_fused_sign_controlled_addsub_digit_for_centered_test(b, acc, shifted_v, sign_hist);
+        b.x(sign_hist);
     }
 
     fn emit_shift_right_1_nooverflow_for_centered_test(
@@ -10576,6 +10541,24 @@ mod tests {
         assert!(v.len() >= 2);
         emit_shift_right_1_nooverflow_for_centered_test(b, v);
         b.cx(v[v.len() - 2], v[v.len() - 1]);
+    }
+
+    fn emit_shift_right_1_nooverflow_inverse_for_centered_test(
+        b: &mut super::super::B,
+        v: &[super::super::QubitId],
+    ) {
+        for i in (0..v.len() - 1).rev() {
+            b.swap(v[i], v[i + 1]);
+        }
+    }
+
+    fn emit_arithmetic_shift_right_1_exact_inverse_for_centered_test(
+        b: &mut super::super::B,
+        v: &[super::super::QubitId],
+    ) {
+        assert!(v.len() >= 2);
+        b.cx(v[v.len() - 2], v[v.len() - 1]);
+        emit_shift_right_1_nooverflow_inverse_for_centered_test(b, v);
     }
 
     fn emit_bitctrl_barrel_left_shift_unsigned_exact_for_centered_test(
@@ -10934,7 +10917,46 @@ mod tests {
         b.free(sign_false);
     }
 
-    fn emit_toy_direct_centered_nonrestoring_inline_coeff_restoring_final_exact_for_centered_test(
+    fn emit_toy_direct_centered_restoring_final_adjusted_step_fast_for_centered_test(
+        b: &mut super::super::B,
+        rem: &[super::super::QubitId],
+        divisor: &[super::super::QubitId],
+        coeff_acc: &[super::super::QubitId],
+        coeff_v: &[super::super::QubitId],
+        digit_hist: &[super::super::QubitId],
+        final_neg1: super::super::QubitId,
+        final_neg2: super::super::QubitId,
+        final_pos_ge: super::super::QubitId,
+        final_lt_tmp: super::super::QubitId,
+        q_neg: bool,
+    ) {
+        assert_eq!(rem.len(), 11);
+        assert_eq!(divisor.len(), 4);
+        let half_v = b.alloc_qubits(rem.len());
+        for i in 1..divisor.len() {
+            b.cx(divisor[i], half_v[i - 1]);
+        }
+        super::super::add_nbit_qq_fast(b, &half_v, rem);
+        for i in (1..divisor.len()).rev() {
+            b.cx(divisor[i], half_v[i - 1]);
+        }
+        b.free_vec(&half_v);
+        emit_toy_direct_centered_nonrestoring_inline_coeff_restoring_final_for_centered_test(
+            b,
+            rem,
+            divisor,
+            coeff_acc,
+            coeff_v,
+            digit_hist,
+            final_neg1,
+            final_neg2,
+            final_pos_ge,
+            final_lt_tmp,
+            q_neg,
+        );
+    }
+
+    fn emit_toy_direct_centered_restoring_final_adjusted_step_fast_inverse_for_centered_test(
         b: &mut super::super::B,
         rem: &[super::super::QubitId],
         divisor: &[super::super::QubitId],
@@ -10952,76 +10974,45 @@ mod tests {
         assert_eq!(divisor.len(), 4);
         assert_eq!(coeff_acc.len(), coeff_v.len());
         let top_shift = digit_hist.len() - 1;
-        assert!(coeff_v.len() > top_shift);
         let sign_false = b.alloc_qubit();
         let sign_true = b.alloc_qubit();
         b.x(sign_true);
-        let coeff_sign_pos = if q_neg { sign_true } else { sign_false };
-        let coeff_sign_neg = if q_neg { sign_false } else { sign_true };
+        let coeff_sign_pos_inv = if q_neg { sign_false } else { sign_true };
+        let coeff_sign_neg_inv = if q_neg { sign_true } else { sign_false };
 
         let shifted_v = b.alloc_qubits(rem.len());
         let shifted_cv = b.alloc_qubits(coeff_v.len());
         for i in 0..divisor.len() {
-            b.cx(divisor[i], shifted_v[i + top_shift]);
+            b.cx(divisor[i], shifted_v[i]);
         }
-        for i in 0..coeff_v.len() - top_shift {
-            b.cx(coeff_v[i], shifted_cv[i + top_shift]);
-        }
-        for sh in (1..digit_hist.len()).rev() {
-            b.cx(rem[rem.len() - 1], digit_hist[sh]);
-            emit_fused_sign_controlled_addsub_digit_exact_for_centered_test(
-                b,
-                rem,
-                &shifted_v,
-                digit_hist[sh],
-            );
-            if q_neg {
-                b.x(digit_hist[sh]);
-            }
-            emit_fused_sign_controlled_addsub_digit_exact_for_centered_test(
-                b,
-                coeff_acc,
-                &shifted_cv,
-                digit_hist[sh],
-            );
-            if q_neg {
-                b.x(digit_hist[sh]);
-            }
-            emit_shift_right_1_nooverflow_for_centered_test(b, &shifted_v);
-            emit_arithmetic_shift_right_1_exact_for_centered_test(b, &shifted_cv);
+        for i in 0..coeff_v.len() {
+            b.cx(coeff_v[i], shifted_cv[i]);
         }
 
-        b.cx(rem[rem.len() - 1], final_neg1);
-        emit_active_fused_sign_controlled_addsub_digit_exact_for_centered_test(
+        let half_v = b.alloc_qubits(rem.len());
+        for i in 1..divisor.len() {
+            b.cx(divisor[i], half_v[i - 1]);
+        }
+        super::super::add_nbit_qq_fast(b, &half_v, rem);
+        for i in (1..divisor.len()).rev() {
+            b.cx(divisor[i], half_v[i - 1]);
+        }
+        b.free_vec(&half_v);
+
+        emit_active_fused_sign_controlled_addsub_digit_for_centered_test(
             b,
             rem,
             &shifted_v,
-            final_neg1,
+            final_pos_ge,
             sign_true,
         );
-        emit_active_fused_sign_controlled_addsub_digit_exact_for_centered_test(
+        emit_active_fused_sign_controlled_addsub_digit_for_centered_test(
             b,
             coeff_acc,
             &shifted_cv,
-            final_neg1,
-            coeff_sign_neg,
+            final_pos_ge,
+            coeff_sign_pos_inv,
         );
-        b.ccx(final_neg1, rem[rem.len() - 1], final_neg2);
-        emit_active_fused_sign_controlled_addsub_digit_exact_for_centered_test(
-            b,
-            rem,
-            &shifted_v,
-            final_neg2,
-            sign_true,
-        );
-        emit_active_fused_sign_controlled_addsub_digit_exact_for_centered_test(
-            b,
-            coeff_acc,
-            &shifted_cv,
-            final_neg2,
-            coeff_sign_neg,
-        );
-
         let pos = b.alloc_qubit();
         b.cx(final_neg1, pos);
         b.x(pos);
@@ -11030,84 +11021,90 @@ mod tests {
         b.ccx(pos, final_lt_tmp, final_pos_ge);
         b.x(final_lt_tmp);
         super::super::cmp_lt_into(b, rem, &shifted_v, final_lt_tmp);
-        emit_active_fused_sign_controlled_addsub_digit_exact_for_centered_test(
-            b,
-            rem,
-            &shifted_v,
-            final_pos_ge,
-            sign_false,
-        );
-        emit_active_fused_sign_controlled_addsub_digit_exact_for_centered_test(
-            b,
-            coeff_acc,
-            &shifted_cv,
-            final_pos_ge,
-            coeff_sign_pos,
-        );
         b.x(pos);
         b.cx(final_neg1, pos);
         b.free(pos);
 
-        let half_v = b.alloc_qubits(rem.len());
-        for i in 1..divisor.len() {
-            b.cx(divisor[i], half_v[i - 1]);
-        }
-        super::super::sub_nbit_qq(b, &half_v, rem);
-        for i in (1..divisor.len()).rev() {
-            b.cx(divisor[i], half_v[i - 1]);
-        }
-        b.free_vec(&half_v);
+        emit_active_fused_sign_controlled_addsub_digit_for_centered_test(
+            b,
+            rem,
+            &shifted_v,
+            final_neg2,
+            sign_false,
+        );
+        emit_active_fused_sign_controlled_addsub_digit_for_centered_test(
+            b,
+            coeff_acc,
+            &shifted_cv,
+            final_neg2,
+            coeff_sign_neg_inv,
+        );
+        b.ccx(final_neg1, rem[rem.len() - 1], final_neg2);
 
-        for i in (0..coeff_v.len()).rev() {
-            b.cx(coeff_v[i], shifted_cv[i]);
+        emit_active_fused_sign_controlled_addsub_digit_for_centered_test(
+            b,
+            rem,
+            &shifted_v,
+            final_neg1,
+            sign_false,
+        );
+        emit_active_fused_sign_controlled_addsub_digit_for_centered_test(
+            b,
+            coeff_acc,
+            &shifted_cv,
+            final_neg1,
+            coeff_sign_neg_inv,
+        );
+        b.cx(rem[rem.len() - 1], final_neg1);
+
+        for sh in 1..digit_hist.len() {
+            emit_shift_right_1_nooverflow_inverse_for_centered_test(b, &shifted_v);
+            emit_arithmetic_shift_right_1_exact_inverse_for_centered_test(b, &shifted_cv);
+            if q_neg {
+                emit_fused_sign_controlled_addsub_digit_for_centered_test(
+                    b,
+                    coeff_acc,
+                    &shifted_cv,
+                    digit_hist[sh],
+                );
+            } else {
+                emit_fused_sign_controlled_addsub_digit_opposite_for_centered_test(
+                    b,
+                    coeff_acc,
+                    &shifted_cv,
+                    digit_hist[sh],
+                );
+            }
+            emit_fused_sign_controlled_addsub_digit_opposite_for_centered_test(
+                b,
+                rem,
+                &shifted_v,
+                digit_hist[sh],
+            );
+            b.cx(rem[rem.len() - 1], digit_hist[sh]);
+        }
+
+        for i in (0..coeff_v.len() - top_shift).rev() {
+            b.cx(coeff_v[i], shifted_cv[i + top_shift]);
         }
         for i in (0..divisor.len()).rev() {
-            b.cx(divisor[i], shifted_v[i]);
+            b.cx(divisor[i], shifted_v[i + top_shift]);
         }
         b.free_vec(&shifted_cv);
         b.free_vec(&shifted_v);
         b.x(sign_true);
         b.free(sign_true);
         b.free(sign_false);
-    }
 
-    fn emit_toy_direct_centered_restoring_final_adjusted_step_exact_for_centered_test(
-        b: &mut super::super::B,
-        rem: &[super::super::QubitId],
-        divisor: &[super::super::QubitId],
-        coeff_acc: &[super::super::QubitId],
-        coeff_v: &[super::super::QubitId],
-        digit_hist: &[super::super::QubitId],
-        final_neg1: super::super::QubitId,
-        final_neg2: super::super::QubitId,
-        final_pos_ge: super::super::QubitId,
-        final_lt_tmp: super::super::QubitId,
-        q_neg: bool,
-    ) {
-        assert_eq!(rem.len(), 11);
-        assert_eq!(divisor.len(), 4);
         let half_v = b.alloc_qubits(rem.len());
         for i in 1..divisor.len() {
             b.cx(divisor[i], half_v[i - 1]);
         }
-        super::super::add_nbit_qq(b, &half_v, rem);
+        super::super::sub_nbit_qq_fast(b, &half_v, rem);
         for i in (1..divisor.len()).rev() {
             b.cx(divisor[i], half_v[i - 1]);
         }
         b.free_vec(&half_v);
-        emit_toy_direct_centered_nonrestoring_inline_coeff_restoring_final_exact_for_centered_test(
-            b,
-            rem,
-            divisor,
-            coeff_acc,
-            coeff_v,
-            digit_hist,
-            final_neg1,
-            final_neg2,
-            final_pos_ge,
-            final_lt_tmp,
-            q_neg,
-        );
     }
 
     fn emit_centered_final_half_fix_for_centered_test(
@@ -11964,7 +11961,7 @@ mod tests {
             let final_pos_ge = b.alloc_qubit();
             let final_lt_tmp = b.alloc_qubit();
             let start = b.ops.len();
-            emit_toy_direct_centered_restoring_final_adjusted_step_exact_for_centered_test(
+            emit_toy_direct_centered_restoring_final_adjusted_step_fast_for_centered_test(
                 &mut b,
                 &rem,
                 &divisor,
@@ -11983,21 +11980,19 @@ mod tests {
             for i in 0..COEFF_W {
                 b.cx(coeff_acc[i], coeff_copy[i]);
             }
-            super::super::emit_inverse(&mut b, |b| {
-                emit_toy_direct_centered_restoring_final_adjusted_step_exact_for_centered_test(
-                    b,
-                    &rem,
-                    &divisor,
-                    &coeff_acc,
-                    &coeff_v,
-                    &digit_hist,
-                    final_neg1,
-                    final_neg2,
-                    final_pos_ge,
-                    final_lt_tmp,
-                    q_neg,
-                );
-            });
+            emit_toy_direct_centered_restoring_final_adjusted_step_fast_inverse_for_centered_test(
+                &mut b,
+                &rem,
+                &divisor,
+                &coeff_acc,
+                &coeff_v,
+                &digit_hist,
+                final_neg1,
+                final_neg2,
+                final_pos_ge,
+                final_lt_tmp,
+                q_neg,
+            );
             let ccx = local_count_ccx_for_plusminus_cost(&b.ops[start..]);
             let peak = b.peak_qubits;
             let num_qubits = b.next_qubit as usize;
@@ -12086,12 +12081,12 @@ mod tests {
                 }
             }
             let suffix = if q_neg { "qneg" } else { "qpos" };
-            println!("METRIC centered_direct_restoring_final_bennett_exact_{suffix}_ccx={ccx}");
-            println!("METRIC centered_direct_restoring_final_bennett_exact_{suffix}_peak_q={peak}");
+            println!("METRIC centered_direct_restoring_final_bennett_fast_inverse_{suffix}_ccx={ccx}");
+            println!("METRIC centered_direct_restoring_final_bennett_fast_inverse_{suffix}_peak_q={peak}");
             eprintln!(
-                "Centered direct restoring-final exact Bennett step toy ({suffix}): ccx={ccx}, peak={peak}"
+                "Centered direct restoring-final fast-inverse Bennett step toy ({suffix}): ccx={ccx}, peak={peak}"
             );
-            assert!(ccx > 2 * 306, "exact Bennett step should include preadjust and reverse work");
+            assert!(ccx > 2 * 306, "fast-inverse Bennett step should include preadjust and reverse work");
         }
     }
 
