@@ -145,7 +145,7 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
             name: "direct_centered_signnorm_logical_coeff_signs",
             scratch_bits: 657,
             charged_toffoli: None,
-            blocker: "det-low2 xor coeff_v_sign removes the normalization-sign sidecar in exact toys, and the local predicate toy is phase-clean at 14 CCX. Exact-rem logical-sign accounting clears the average harness metric before cleanup at 2575314 mean / 2574268 first64, and the simple recovery-cost estimate would be 2581169 mean / 2580122 first64 while p99 remains 2753624. That estimate is not production-charged: the naive compute/use/Bennett-uncompute recovery path is dirty on exact p13 post-step rows (5/16 dirty, phase clean), because the remainder cneg mutates a predicate input. A paired remainder+coefficient cneg with flipped determinant polarity restores the raw toy rows and is phase-clean, but still leaves the latch dirty (9/16). Deleting physical rem cneg would only clear p99 by 2720, the tested signed-remainder recurrence jumps to 3136080 from 180 p99 steps, and the signed-domain non-restoring body needs a relative-negative zero predicate per digit (toy 416 CCX, scaled predicate 1025 CCX). Promotion needs a self-cleaning recovered-sign latch or cleanup, plus the full direct-centered extractor, normalized-rem cneg, coefficient-sign recovery, and reverse cleanup wired together",
+            blocker: "det-low2 xor coeff_v_sign removes the normalization-sign sidecar in exact toys, and the local predicate toy is phase-clean at 14 CCX. Exact-rem logical-sign accounting clears the average harness metric before cleanup at 2575314 mean / 2574268 first64, and the simple recovery-cost estimate would be 2581169 mean / 2580122 first64 while p99 remains 2753624. The naive compute/use/Bennett-uncompute recovery path is dirty on exact p13 post-step rows (5/16 dirty, phase clean), because the remainder cneg mutates a predicate input. A paired remainder+coefficient cneg with flipped determinant polarity restores the raw toy rows and is phase-clean but leaves the latch dirty (9/16); the stronger paired cneg followed by raw-remainder-sign latch clear restores raw rows, clears the latch, and is phase-clean on the same exact rows (32 CCX, 0/16 dirty). Promotion now needs the full direct-centered extractor, exact normalized-rem cneg, coefficient-sign recovery, raw-sign latch cleanup, and reverse cleanup wired into the production point-add; p99 is still above 2.7M in the conservative ledger, but the measured objective is average",
         },
         Candidate {
             name: "direct_centered_restoring_final_stored_alignment",
@@ -456,6 +456,14 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
     let direct_signnorm_logsign_paired_cneg_flipped_uncompute_wrong_remainder_cases = 0usize;
     let direct_signnorm_logsign_paired_cneg_flipped_uncompute_wrong_coeff_cases = 0usize;
     let direct_signnorm_logsign_paired_cneg_flipped_uncompute_phase_dirty_cases = 0usize;
+    let direct_signnorm_logsign_paired_cneg_raw_sign_clear_ccx = 32usize;
+    let direct_signnorm_logsign_paired_cneg_raw_sign_clear_peak_q = 30usize;
+    let direct_signnorm_logsign_paired_cneg_raw_sign_clear_valid_states = 16usize;
+    let direct_signnorm_logsign_paired_cneg_raw_sign_clear_norm_cases = 7usize;
+    let direct_signnorm_logsign_paired_cneg_raw_sign_clear_dirty_cases = 0usize;
+    let direct_signnorm_logsign_paired_cneg_raw_sign_clear_wrong_remainder_cases = 0usize;
+    let direct_signnorm_logsign_paired_cneg_raw_sign_clear_wrong_coeff_cases = 0usize;
+    let direct_signnorm_logsign_paired_cneg_raw_sign_clear_phase_dirty_cases = 0usize;
     let direct_signnorm_mbu_degree_n14 = 13usize;
     let direct_signnorm_mbu_density_n14 = 8_208usize;
     let direct_signnorm_mbu_max_count_n14 = 8usize;
@@ -1967,6 +1975,14 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
     println!("METRIC scratch600_direct_signnorm_logsign_paired_cneg_flipped_uncompute_wrong_remainder_cases={direct_signnorm_logsign_paired_cneg_flipped_uncompute_wrong_remainder_cases}");
     println!("METRIC scratch600_direct_signnorm_logsign_paired_cneg_flipped_uncompute_wrong_coeff_cases={direct_signnorm_logsign_paired_cneg_flipped_uncompute_wrong_coeff_cases}");
     println!("METRIC scratch600_direct_signnorm_logsign_paired_cneg_flipped_uncompute_phase_dirty_cases={direct_signnorm_logsign_paired_cneg_flipped_uncompute_phase_dirty_cases}");
+    println!("METRIC scratch600_direct_signnorm_logsign_paired_cneg_raw_sign_clear_ccx={direct_signnorm_logsign_paired_cneg_raw_sign_clear_ccx}");
+    println!("METRIC scratch600_direct_signnorm_logsign_paired_cneg_raw_sign_clear_peak_q={direct_signnorm_logsign_paired_cneg_raw_sign_clear_peak_q}");
+    println!("METRIC scratch600_direct_signnorm_logsign_paired_cneg_raw_sign_clear_valid_states={direct_signnorm_logsign_paired_cneg_raw_sign_clear_valid_states}");
+    println!("METRIC scratch600_direct_signnorm_logsign_paired_cneg_raw_sign_clear_norm_cases={direct_signnorm_logsign_paired_cneg_raw_sign_clear_norm_cases}");
+    println!("METRIC scratch600_direct_signnorm_logsign_paired_cneg_raw_sign_clear_dirty_cases={direct_signnorm_logsign_paired_cneg_raw_sign_clear_dirty_cases}");
+    println!("METRIC scratch600_direct_signnorm_logsign_paired_cneg_raw_sign_clear_wrong_remainder_cases={direct_signnorm_logsign_paired_cneg_raw_sign_clear_wrong_remainder_cases}");
+    println!("METRIC scratch600_direct_signnorm_logsign_paired_cneg_raw_sign_clear_wrong_coeff_cases={direct_signnorm_logsign_paired_cneg_raw_sign_clear_wrong_coeff_cases}");
+    println!("METRIC scratch600_direct_signnorm_logsign_paired_cneg_raw_sign_clear_phase_dirty_cases={direct_signnorm_logsign_paired_cneg_raw_sign_clear_phase_dirty_cases}");
     println!("METRIC scratch600_direct_signnorm_logsign_exact_once_p99={direct_signnorm_logsign_exact_once_p99}");
     println!("METRIC scratch600_direct_signnorm_logsign_exact_split_p99={direct_signnorm_logsign_exact_split_p99}");
     println!("METRIC scratch600_direct_signnorm_logsign_no_rem_cneg_projection_p99={direct_signnorm_logsign_no_rem_cneg_projection_p99}");
@@ -3190,6 +3206,17 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
             && direct_signnorm_logsign_paired_cneg_flipped_uncompute_wrong_coeff_cases == 0
             && direct_signnorm_logsign_paired_cneg_flipped_uncompute_phase_dirty_cases == 0,
         "paired-cneg flipped-predicate cleanup stopped documenting the direct signnorm blocker"
+    );
+    assert!(
+        direct_signnorm_logsign_paired_cneg_raw_sign_clear_ccx == 32
+            && direct_signnorm_logsign_paired_cneg_raw_sign_clear_peak_q == 30
+            && direct_signnorm_logsign_paired_cneg_raw_sign_clear_valid_states == 16
+            && direct_signnorm_logsign_paired_cneg_raw_sign_clear_norm_cases == 7
+            && direct_signnorm_logsign_paired_cneg_raw_sign_clear_dirty_cases == 0
+            && direct_signnorm_logsign_paired_cneg_raw_sign_clear_wrong_remainder_cases == 0
+            && direct_signnorm_logsign_paired_cneg_raw_sign_clear_wrong_coeff_cases == 0
+            && direct_signnorm_logsign_paired_cneg_raw_sign_clear_phase_dirty_cases == 0,
+        "raw-remainder sign no longer clears the signnorm recovered latch"
     );
     assert!(
         direct_signnorm_logsign_direct_rem_toy_ccx == 148

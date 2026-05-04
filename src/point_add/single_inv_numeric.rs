@@ -32412,6 +32412,130 @@ mod tests {
     }
 
     #[test]
+    fn direct_centered_signnorm_paired_cneg_raw_sign_clears_latch() {
+        // The paired-cneg cleanup above leaves the recovered latch dirty when it
+        // tries to recompute the determinant predicate after mutating its
+        // inputs.  But after undoing the remainder cneg, the raw signed
+        // remainder's top bit is exactly the normalization sign for nonzero
+        // centered remainders.  This checks the structural escape: compute the
+        // cheap det-low2 latch, undo the remainder and coefficient cnegs, then
+        // clear the latch with the raw remainder sign bit.
+        use sha3::digest::{ExtendableOutput, Update};
+
+        const REM_W: usize = 5;
+        const COEFF_W: usize = 6;
+        let p = 13i128;
+        let p_low2 = (p & 3) as u8;
+        let mut b = super::super::B::new();
+        let v = b.alloc_qubits(REM_W);
+        let next_v = b.alloc_qubits(REM_W);
+        let coeff_v = b.alloc_qubits(COEFF_W);
+        let next_coeff = b.alloc_qubits(COEFF_W);
+        let recovered = b.alloc_qubit();
+        let start = b.ops.len();
+        emit_toy_signnorm_det_low2_coeff_sign_predicate_for_centered_test(
+            &mut b,
+            [v[0], v[1]],
+            [next_v[0], next_v[1]],
+            [coeff_v[0], coeff_v[1]],
+            [next_coeff[0], next_coeff[1]],
+            coeff_v[COEFF_W - 1],
+            recovered,
+            p_low2,
+        );
+        emit_twos_cneg_exact_for_centered_test(&mut b, &next_v, recovered);
+        emit_twos_cneg_exact_for_centered_test(&mut b, &next_coeff, recovered);
+        b.cx(next_v[REM_W - 1], recovered);
+        let ccx = local_count_ccx_for_plusminus_cost(&b.ops[start..]);
+        let peak = b.peak_qubits;
+        let num_qubits = b.next_qubit as usize;
+        let num_bits = b.next_bit as usize;
+        let ops = b.ops;
+        let raw_from_i128 = |x: i128, width: usize| -> u64 {
+            (x & ((1i128 << width) - 1)) as u64
+        };
+        let mut valid_states = 0usize;
+        let mut exercised_norm_cases = 0usize;
+        let mut dirty_recovered_cases = 0usize;
+        let mut wrong_remainder_cases = 0usize;
+        let mut wrong_coeff_cases = 0usize;
+        let mut phase_dirty_cases = 0usize;
+        for x in 1..p {
+            let mut u = p;
+            let mut vv = x;
+            let mut coeff_u = 0i128;
+            let mut coeff_vv = 1i128;
+            while vv != 0 {
+                let adjusted = u + (vv >> 1);
+                let q = adjusted / vv;
+                let rem = u - q * vv;
+                let norm_sign = rem < 0;
+                let next_vv = rem.abs();
+                let next_coeff_raw = coeff_u - q * coeff_vv;
+                let next_coeff_norm = if norm_sign {
+                    -next_coeff_raw
+                } else {
+                    next_coeff_raw
+                };
+                if next_vv != 0 {
+                    valid_states += 1;
+                    exercised_norm_cases += norm_sign as usize;
+                    let mut hasher = sha3::Shake128::default();
+                    hasher.update(b"signnorm-paired-cneg-raw-sign-clear-v1");
+                    let mut xof = hasher.finalize_xof();
+                    let mut sim = crate::sim::Simulator::new(num_qubits, num_bits, &mut xof);
+                    set_slice_u512_pm(&mut sim, &v, U512::from(vv as u64));
+                    set_slice_u512_pm(&mut sim, &next_v, U512::from(next_vv as u64));
+                    set_slice_u512_pm(
+                        &mut sim,
+                        &coeff_v,
+                        U512::from(raw_from_i128(coeff_vv, COEFF_W)),
+                    );
+                    set_slice_u512_pm(
+                        &mut sim,
+                        &next_coeff,
+                        U512::from(raw_from_i128(next_coeff_norm, COEFF_W)),
+                    );
+                    sim.apply(&ops);
+                    dirty_recovered_cases += ((sim.qubit(recovered) & 1) != 0) as usize;
+                    wrong_remainder_cases += (get_slice_u512_pm(&sim, &next_v).as_limbs()[0]
+                        & ((1u64 << REM_W) - 1)
+                        != raw_from_i128(rem, REM_W)) as usize;
+                    wrong_coeff_cases += (get_slice_u512_pm(&sim, &next_coeff).as_limbs()[0]
+                        & ((1u64 << COEFF_W) - 1)
+                        != raw_from_i128(next_coeff_raw, COEFF_W)) as usize;
+                    phase_dirty_cases += ((sim.global_phase() & 1) != 0) as usize;
+                }
+                u = vv;
+                vv = next_vv;
+                coeff_u = coeff_vv;
+                coeff_vv = next_coeff_norm;
+            }
+        }
+        println!("METRIC centered_direct_signnorm_paired_cneg_raw_sign_clear_ccx={ccx}");
+        println!("METRIC centered_direct_signnorm_paired_cneg_raw_sign_clear_peak_q={peak}");
+        println!("METRIC centered_direct_signnorm_paired_cneg_raw_sign_clear_valid_states={valid_states}");
+        println!("METRIC centered_direct_signnorm_paired_cneg_raw_sign_clear_norm_cases={exercised_norm_cases}");
+        println!("METRIC centered_direct_signnorm_paired_cneg_raw_sign_clear_dirty_cases={dirty_recovered_cases}");
+        println!("METRIC centered_direct_signnorm_paired_cneg_raw_sign_clear_wrong_remainder_cases={wrong_remainder_cases}");
+        println!("METRIC centered_direct_signnorm_paired_cneg_raw_sign_clear_wrong_coeff_cases={wrong_coeff_cases}");
+        println!("METRIC centered_direct_signnorm_paired_cneg_raw_sign_clear_phase_dirty_cases={phase_dirty_cases}");
+        eprintln!(
+            "Signnorm paired-cneg raw-sign clear: ccx={ccx}, peak={peak}, valid={valid_states}, norm_cases={exercised_norm_cases}, dirty={dirty_recovered_cases}, wrong_rem={wrong_remainder_cases}, wrong_coeff={wrong_coeff_cases}, phase_dirty={phase_dirty_cases}"
+        );
+        assert!(valid_states > 0, "toy did not produce exact post-step rows");
+        assert!(exercised_norm_cases > 0, "toy did not exercise normalization");
+        assert_eq!(dirty_recovered_cases, 0, "raw sign bit did not clean the recovered latch");
+        assert_eq!(wrong_remainder_cases, 0, "paired cneg did not recover raw remainder");
+        assert_eq!(wrong_coeff_cases, 0, "paired cneg did not recover raw coefficient");
+        assert_eq!(phase_dirty_cases, 0, "raw-sign latch cleanup introduced phase dirt");
+        assert!(
+            ccx > 2 * 14,
+            "paired cneg cleanup stopped charging the coefficient cneg"
+        );
+    }
+
+    #[test]
     fn direct_centered_signed_domain_nonrestoring_floor_toy_is_phase_clean() {
         // Structural check for the sign-normalized direct route: consume signed
         // two's-complement residual and divisor lanes directly.  The streamed
