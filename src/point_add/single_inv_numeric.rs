@@ -5857,6 +5857,7 @@ mod tests {
         const TAIL_REPLAY_PER_BIT_CCX: usize = 587;
         const TARGET: f64 = 2_700_000.0;
         const DEPTH: usize = 64;
+        const WINDOW_SCAN: [usize; 7] = [2, 3, 4, 5, 6, 7, 8];
         let p = SECP256K1_P;
         let samples = 4096usize;
         let mut rng = 0x5ec0_0001_d7ba_0064u64;
@@ -5872,6 +5873,14 @@ mod tests {
         let mut app_sep4_rows = Vec::with_capacity(samples);
         let mut app_joint4_rows = Vec::with_capacity(samples);
         let mut app_selector_floor_rows = Vec::with_capacity(samples);
+        let mut scan_joint_pointadds =
+            vec![Vec::<isize>::with_capacity(samples); WINDOW_SCAN.len()];
+        let mut scan_joint_apps =
+            vec![Vec::<usize>::with_capacity(samples); WINDOW_SCAN.len()];
+        let mut scan_joint_selector_floors =
+            vec![Vec::<usize>::with_capacity(samples); WINDOW_SCAN.len()];
+        let mut scan_joint_table_rows =
+            vec![Vec::<usize>::with_capacity(samples); WINDOW_SCAN.len()];
         let mut first64_popcount = 0isize;
         let mut first64_static = 0isize;
         let mut first64_sep4 = 0isize;
@@ -6039,6 +6048,26 @@ mod tests {
                 sep4_pointadd + 2 * app_selector_floor as isize;
             let joint4_with_selector_pointadd =
                 joint4_pointadd + 2 * app_selector_floor as isize;
+            let coeff_bits0 = u512_bit_len_for_halfgcd_test(b.mag);
+            let coeff_bits1 = u512_bit_len_for_halfgcd_test(d.mag);
+            let div_ceil = |x: usize, y: usize| -> usize {
+                if x == 0 { 0 } else { (x + y - 1) / y }
+            };
+            for (window_idx, &window) in WINDOW_SCAN.iter().enumerate() {
+                let app_joint =
+                    halfgcd_signed_two_coeff_apply_static_window_floor_for_test(
+                        b, d, window, true,
+                    );
+                let joint_windows = div_ceil(coeff_bits0.max(coeff_bits1), window);
+                let table_row_floor =
+                    joint_windows * ((1usize << (2 * window)).saturating_sub(1));
+                let selector_floor = app_selector_floor.max(table_row_floor);
+                let pointadd = without_app + 2 * (app_joint + selector_floor) as isize;
+                scan_joint_pointadds[window_idx].push(pointadd);
+                scan_joint_apps[window_idx].push(app_joint);
+                scan_joint_selector_floors[window_idx].push(selector_floor);
+                scan_joint_table_rows[window_idx].push(table_row_floor);
+            }
             if sample_idx < 64 {
                 first64_popcount += popcount_pointadd;
                 first64_static += static_pointadd;
@@ -6091,6 +6120,28 @@ mod tests {
         let sep4_selector_budget = ((TARGET - sep4_mean) / 2.0).max(0.0);
         let joint4_selector_budget = ((TARGET - joint4_mean) / 2.0).max(0.0);
         let selector_over_joint4_budget = app_selector_floor_mean - joint4_selector_budget;
+        let mut best_scan: Option<(usize, f64, isize, f64, f64, f64)> = None;
+        for (window_idx, &window) in WINDOW_SCAN.iter().enumerate() {
+            let mean = mean_isize(&scan_joint_pointadds[window_idx]);
+            let app_mean = mean_usize(&scan_joint_apps[window_idx]);
+            let selector_mean = mean_usize(&scan_joint_selector_floors[window_idx]);
+            let table_row_mean = mean_usize(&scan_joint_table_rows[window_idx]);
+            let p99 = p99_isize(&mut scan_joint_pointadds[window_idx]);
+            if best_scan
+                .map(|(_, old_mean, _, _, _, _)| mean < old_mean)
+                .unwrap_or(true)
+            {
+                best_scan = Some((window, mean, p99, app_mean, selector_mean, table_row_mean));
+            }
+        }
+        let (
+            best_scan_window,
+            best_scan_mean,
+            best_scan_p99,
+            best_scan_app_mean,
+            best_scan_selector_mean,
+            best_scan_table_row_mean,
+        ) = best_scan.unwrap();
         let popcount_p99 = p99_isize(&mut popcount_pointadds);
         let static_p99 = p99_isize(&mut static_pointadds);
         let sep4_p99 = p99_isize(&mut sep4_pointadds);
@@ -6120,6 +6171,28 @@ mod tests {
             joint4_with_selector_mean - TARGET
         );
         println!(
+            "METRIC halfgcd_fixed_depth64_static_window_scan_best_w={best_scan_window}"
+        );
+        println!(
+            "METRIC halfgcd_fixed_depth64_static_window_scan_best_pointadd_mean={best_scan_mean:.3}"
+        );
+        println!(
+            "METRIC halfgcd_fixed_depth64_static_window_scan_best_pointadd_p99={best_scan_p99}"
+        );
+        println!(
+            "METRIC halfgcd_fixed_depth64_static_window_scan_best_gap_to_2700k={:.3}",
+            best_scan_mean - TARGET
+        );
+        println!(
+            "METRIC halfgcd_fixed_depth64_static_window_scan_best_app_mean={best_scan_app_mean:.3}"
+        );
+        println!(
+            "METRIC halfgcd_fixed_depth64_static_window_scan_best_selector_floor_mean={best_scan_selector_mean:.3}"
+        );
+        println!(
+            "METRIC halfgcd_fixed_depth64_static_window_scan_best_table_row_floor_mean={best_scan_table_row_mean:.3}"
+        );
+        println!(
             "METRIC halfgcd_fixed_depth64_static_app_gap_to_2700k={:.3}",
             static_mean - TARGET
         );
@@ -6139,7 +6212,7 @@ mod tests {
         );
         println!("METRIC halfgcd_fixed_depth64_app_static_over_popcount_mean={app_delta_mean:.3}");
         eprintln!(
-            "half-GCD fixed-depth64 coefficient application control model: popcount_mean={popcount_mean:.1}, static_mean={static_mean:.1}, sep4_mean={sep4_mean:.1}, joint4_mean={joint4_mean:.1}, joint4_with_selector={joint4_with_selector_mean:.1}, first64_static={static_first64:.1}, static_p99={static_p99}, app_popcount_mean={app_popcount_mean:.1}, app_static_mean={app_static_mean:.1}, app_sep4={app_sep4_mean:.1}, app_joint4={app_joint4_mean:.1}, selector_floor={app_selector_floor_mean:.1}, app_delta={app_delta_mean:.1}, sep4_budget={sep4_selector_budget:.1}, joint4_budget={joint4_selector_budget:.1}, selector_over_joint4_budget={selector_over_joint4_budget:.1}"
+            "half-GCD fixed-depth64 coefficient application control model: popcount_mean={popcount_mean:.1}, static_mean={static_mean:.1}, sep4_mean={sep4_mean:.1}, joint4_mean={joint4_mean:.1}, joint4_with_selector={joint4_with_selector_mean:.1}, scan_best_w={best_scan_window}, scan_best={best_scan_mean:.1}, first64_static={static_first64:.1}, static_p99={static_p99}, app_popcount_mean={app_popcount_mean:.1}, app_static_mean={app_static_mean:.1}, app_sep4={app_sep4_mean:.1}, app_joint4={app_joint4_mean:.1}, selector_floor={app_selector_floor_mean:.1}, scan_selector={best_scan_selector_mean:.1}, scan_rows={best_scan_table_row_mean:.1}, app_delta={app_delta_mean:.1}, sep4_budget={sep4_selector_budget:.1}, joint4_budget={joint4_selector_budget:.1}, selector_over_joint4_budget={selector_over_joint4_budget:.1}"
         );
         assert!(
             popcount_mean > TARGET && popcount_first64 > TARGET,
@@ -6162,6 +6235,10 @@ mod tests {
                 && joint4_with_selector_mean > TARGET
                 && sep4_with_selector_mean > TARGET,
             "bit-product selector floor now fits the static-window budget; promote a real selector circuit"
+        );
+        assert!(
+            best_scan_mean > TARGET && best_scan_mean < joint4_with_selector_mean,
+            "some fixed-depth static window now fits after selector/table floor; promote half-GCD"
         );
     }
 
