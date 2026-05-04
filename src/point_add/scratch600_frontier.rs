@@ -151,7 +151,7 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
             name: "halfgcd_second_column_fixed_depth64_tail_stream",
             scratch_bits: 515,
             charged_toffoli: Some(2_740_870),
-            blocker: "fixed-depth64 exact+packed-tail floor averages 2533612 at p99 2616556, but generic tail log-barrel alignment raises exact cleanup to 2740870 avg / 2822826 p99",
+            blocker: "fixed-depth64 exact+packed-tail floor averages 2533612 and sampled 5-bit tail barrel averages 2663148, but p99 is 2729614 and exact high-quotient fallback is unbuilt; generic 8-bit tail log-barrel raises exact cleanup to 2740870 avg",
         },
         Candidate {
             name: "folded_kaliski_one_pair_plus_required_sidecar",
@@ -481,7 +481,11 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
     let halfgcd_second_col_fixed_depth64_scratch_p99 = 515usize;
     let halfgcd_second_col_fixed_depth64_tail_bits_p99 = 225usize;
     let halfgcd_second_col_fixed_depth64_tail_count_p99 = 108usize;
+    let halfgcd_second_col_fixed_depth64_tail_width_sum_p99 = 9_136usize;
+    let halfgcd_second_col_fixed_depth64_tail_max_q_bits_p99 = 14usize;
+    let halfgcd_second_col_fixed_depth64_tail_bounded_barrel_bits = 5usize;
     let halfgcd_second_col_fixed_depth64_tail_extract_floor_p99 = 66_389usize;
+    let halfgcd_second_col_fixed_depth64_tail_bounded_barrel_floor_p99 = 45_680usize;
     let halfgcd_second_col_fixed_depth64_tail_logbarrel_floor_p99 = 73_088usize;
     let halfgcd_second_col_fixed_depth64_exact_mean = 2_332_242usize;
     let halfgcd_second_col_fixed_depth64_exact_p99 = 2_474_014usize;
@@ -490,6 +494,13 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
     let halfgcd_second_col_fixed_depth64_exact_tail_floor_gap =
         halfgcd_second_col_fixed_depth64_exact_tail_floor_mean as isize
             - GOOGLE_LOW_QUBIT_TOFFOLI as isize;
+    let halfgcd_second_col_fixed_depth64_exact_tail_bounded_barrel_mean = 2_663_148usize;
+    let halfgcd_second_col_fixed_depth64_exact_tail_bounded_barrel_p99 = 2_729_614usize;
+    let halfgcd_second_col_fixed_depth64_exact_tail_bounded_barrel_gap =
+        halfgcd_second_col_fixed_depth64_exact_tail_bounded_barrel_mean as isize
+            - GOOGLE_LOW_QUBIT_TOFFOLI as isize;
+    let halfgcd_second_col_fixed_depth64_noscan_tail_bounded_barrel_mean = 2_535_006usize;
+    let halfgcd_second_col_fixed_depth64_noscan_tail_bounded_barrel_p99 = 2_602_866usize;
     let halfgcd_second_col_fixed_depth64_exact_tail_logbarrel_mean = 2_740_870usize;
     let halfgcd_second_col_fixed_depth64_exact_tail_logbarrel_p99 = 2_822_826usize;
     let halfgcd_second_col_fixed_depth64_exact_tail_logbarrel_gap =
@@ -793,13 +804,22 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_scratch_p99={halfgcd_second_col_fixed_depth64_scratch_p99}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_tail_bits_p99={halfgcd_second_col_fixed_depth64_tail_bits_p99}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_tail_count_p99={halfgcd_second_col_fixed_depth64_tail_count_p99}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_tail_width_sum_p99={halfgcd_second_col_fixed_depth64_tail_width_sum_p99}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_tail_max_q_bits_p99={halfgcd_second_col_fixed_depth64_tail_max_q_bits_p99}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_tail_bounded_barrel_bits={halfgcd_second_col_fixed_depth64_tail_bounded_barrel_bits}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_tail_extract_floor_p99={halfgcd_second_col_fixed_depth64_tail_extract_floor_p99}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_tail_bounded_barrel_floor_p99={halfgcd_second_col_fixed_depth64_tail_bounded_barrel_floor_p99}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_tail_logbarrel_floor_p99={halfgcd_second_col_fixed_depth64_tail_logbarrel_floor_p99}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_mean={halfgcd_second_col_fixed_depth64_exact_mean}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_p99={halfgcd_second_col_fixed_depth64_exact_p99}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_tail_floor_mean={halfgcd_second_col_fixed_depth64_exact_tail_floor_mean}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_tail_floor_p99={halfgcd_second_col_fixed_depth64_exact_tail_floor_p99}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_tail_floor_gap_to_2700k={halfgcd_second_col_fixed_depth64_exact_tail_floor_gap}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_tail_bounded_barrel_mean={halfgcd_second_col_fixed_depth64_exact_tail_bounded_barrel_mean}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_tail_bounded_barrel_p99={halfgcd_second_col_fixed_depth64_exact_tail_bounded_barrel_p99}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_tail_bounded_barrel_gap_to_2700k={halfgcd_second_col_fixed_depth64_exact_tail_bounded_barrel_gap}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_noscan_tail_bounded_barrel_mean={halfgcd_second_col_fixed_depth64_noscan_tail_bounded_barrel_mean}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_noscan_tail_bounded_barrel_p99={halfgcd_second_col_fixed_depth64_noscan_tail_bounded_barrel_p99}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_tail_logbarrel_mean={halfgcd_second_col_fixed_depth64_exact_tail_logbarrel_mean}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_tail_logbarrel_p99={halfgcd_second_col_fixed_depth64_exact_tail_logbarrel_p99}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_tail_logbarrel_gap_to_2700k={halfgcd_second_col_fixed_depth64_exact_tail_logbarrel_gap}");
@@ -1085,6 +1105,12 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
             && halfgcd_second_col_fixed_depth64_exact_p99 < GOOGLE_LOW_QUBIT_TOFFOLI
             && halfgcd_second_col_fixed_depth64_exact_tail_floor_gap < 0
             && halfgcd_second_col_fixed_depth64_exact_tail_floor_p99 < GOOGLE_LOW_QUBIT_TOFFOLI
+            && halfgcd_second_col_fixed_depth64_tail_bounded_barrel_bits < 8
+            && halfgcd_second_col_fixed_depth64_exact_tail_bounded_barrel_gap < 0
+            && halfgcd_second_col_fixed_depth64_exact_tail_bounded_barrel_p99
+                > GOOGLE_LOW_QUBIT_TOFFOLI
+            && halfgcd_second_col_fixed_depth64_noscan_tail_bounded_barrel_p99
+                < GOOGLE_LOW_QUBIT_TOFFOLI
             && halfgcd_second_col_fixed_depth64_exact_tail_logbarrel_gap > 0
             && halfgcd_second_col_fixed_depth64_exact_tail_logbarrel_p99 > GOOGLE_LOW_QUBIT_TOFFOLI
             && halfgcd_second_col_fixed_depth64_noscan_tail_logbarrel_mean
