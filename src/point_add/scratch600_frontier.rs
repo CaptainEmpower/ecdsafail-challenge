@@ -274,6 +274,12 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
             blocker: "joint static-window scan improves to w6 average 2749506 (+49506) under the exact bit-product floor; sparse signed wNAF recoding lowers the source-product floor to 2748271 (+48271), but still needs selector/recoder cost below 86824 one-way instead of 99575; free-active compact NAF w2 would clear at 2691392, but the omitted active/zero predicate is 38097 one-way against 4304 slack; joint signed-binary DP improves the free-active floor to 2679431, but the active predicate is still 38450 one-way against 10285 slack and charging it raises the row to 2756331; reoptimizing signed-binary with active cost in the DP objective still lands at 2756331 (+56331), so this is not just a recoding-objective artifact; active-only toy parity is dense at n14 (wNAF degree 14, 8322/16384; joint signed-binary degree 13, 8194/16384), every live active bit remains high-degree and dense (wNAF min degree 13, 5698/16384; joint min degree 13, 5332/16384), and active support is 29/30 slots; table-only w4 would be 2559198 before data application, but row-controlled source products make the best table-source floor w2 average 3956644, generic cleanup is dense at n14 (plain 8194/16384, wNAF 8162/16384), and exact toy support leaves 27/28 coefficient bit positions live",
         },
         Candidate {
+            name: "halfgcd_second_column_zero_row_id_noactive_floor",
+            scratch_bits: 515,
+            charged_toffoli: Some(2_831_471),
+            blocker: "zero-inclusive row ids do not remove the active/source bottleneck: {-1,0,1}^2 needs four source bits per occupied slot. Even granting the active route's occupied-slot application floor and not charging any extra zero-slot no-op adds, the row-id source averages 114538 and adds 37570 per coefficient application, projecting 2831471 mean (+131471)",
+        },
+        Candidate {
             name: "folded_kaliski_one_pair_plus_required_sidecar",
             scratch_bits: 512 + 255,
             charged_toffoli: Some(4_089_274),

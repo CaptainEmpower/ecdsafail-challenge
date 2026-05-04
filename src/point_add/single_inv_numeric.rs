@@ -4583,6 +4583,30 @@ mod tests {
         )
     }
 
+    fn halfgcd_second_column_after_fixed_depth_for_test(
+        x: U256,
+        p: U256,
+        depth: usize,
+    ) -> (SignedMagU512ForHalfGcdTest, SignedMagU512ForHalfGcdTest) {
+        let mut u = p;
+        let mut v = x;
+        let mut b = smag_for_halfgcd_test(false, U512::ZERO);
+        let mut d = smag_for_halfgcd_test(false, U512::from(1u64));
+        let mut prefix_steps = 0usize;
+        while prefix_steps < depth && !v.is_zero() {
+            let q = u / v;
+            let rem = u - q * v;
+            let nb = d;
+            let nd = signed_sub_scaled_for_halfgcd_test(b, q, d);
+            u = v;
+            v = rem;
+            b = nb;
+            d = nd;
+            prefix_steps += 1;
+        }
+        (b, d)
+    }
+
     fn halfgcd_signed_two_coeff_apply_cost_for_test(
         x0: SignedMagU512ForHalfGcdTest,
         x1: SignedMagU512ForHalfGcdTest,
@@ -9059,6 +9083,91 @@ mod tests {
         assert!(
             best_mean > TARGET,
             "active-charged joint signed-window recoding now clears 2.7M; promote a real recoder/cleanup circuit"
+        );
+    }
+
+    #[test]
+    fn half_gcd_second_column_zero_row_id_still_costs_more_than_active_source() {
+        const SAMPLES: usize = 4096;
+        const DEPTH: usize = 64;
+        const FIELD_BITS: usize = 256;
+        const ZERO_ROW_ID_BITS: usize = 4;
+        const ACTIVE_CHARGED_POINTADD_MEAN: f64 = 2_756_331.0;
+        const TARGET: f64 = 2_700_000.0;
+
+        let p = SECP256K1_P;
+        let mut rng = 0x5eed_5ec0u64;
+        let mut active_costs = Vec::with_capacity(SAMPLES);
+        let mut zero_row_costs = Vec::with_capacity(SAMPLES);
+        let mut zero_row_sources = Vec::with_capacity(SAMPLES);
+        let mut extras = Vec::with_capacity(SAMPLES);
+        let mut occupied_rows = Vec::with_capacity(SAMPLES);
+        let mut digit_rows = Vec::with_capacity(SAMPLES);
+
+        for _ in 0..SAMPLES {
+            let mut x = rand_u256(&mut rng);
+            if x.is_zero() {
+                x = U256::from(1u64);
+            }
+            let (b, d) = halfgcd_second_column_after_fixed_depth_for_test(x, p, DEPTH);
+            let (app, compact_source, active_source, table_row_floor, occupied, digits) =
+                halfgcd_signed_two_coeff_apply_joint_signed_binary_floor_for_test(b, d);
+
+            // A zero-inclusive row-id encoding must distinguish all pairs in
+            // {-1, 0, 1}^2.  Even granting the same occupied-slot application
+            // floor as the active route, those nine rows need four source bits
+            // per occupied slot before any full-slot no-op adds are charged.
+            let zero_row_source_floor = 2 * FIELD_BITS * ZERO_ROW_ID_BITS * occupied;
+            let zero_row_table_floor = occupied * 9;
+            let active_cost = app + compact_source + active_source + table_row_floor;
+            let zero_row_cost = app + zero_row_source_floor + zero_row_table_floor;
+            assert!(
+                zero_row_cost >= active_cost,
+                "zero-row id lower bound unexpectedly beat active/sign source bits"
+            );
+            active_costs.push(active_cost);
+            zero_row_costs.push(zero_row_cost);
+            zero_row_sources.push(zero_row_source_floor);
+            extras.push(zero_row_cost - active_cost);
+            occupied_rows.push(occupied);
+            digit_rows.push(digits);
+        }
+
+        let mean_usize = |rows: &[usize]| -> f64 {
+            rows.iter().map(|&v| v as f64).sum::<f64>() / rows.len() as f64
+        };
+        let min_usize = |rows: &[usize]| -> usize { *rows.iter().min().unwrap() };
+        let max_usize = |rows: &[usize]| -> usize { *rows.iter().max().unwrap() };
+        let active_mean = mean_usize(&active_costs);
+        let zero_row_mean = mean_usize(&zero_row_costs);
+        let zero_row_source_mean = mean_usize(&zero_row_sources);
+        let extra_mean = mean_usize(&extras);
+        let extra_min = min_usize(&extras);
+        let extra_max = max_usize(&extras);
+        let occupied_mean = mean_usize(&occupied_rows);
+        let digit_mean = mean_usize(&digit_rows);
+        let projected_pointadd_mean = ACTIVE_CHARGED_POINTADD_MEAN + 2.0 * extra_mean;
+        println!("METRIC halfgcd_fixed_depth64_zero_row_id_active_cost_mean={active_mean:.3}");
+        println!("METRIC halfgcd_fixed_depth64_zero_row_id_cost_mean={zero_row_mean:.3}");
+        println!("METRIC halfgcd_fixed_depth64_zero_row_id_source_mean={zero_row_source_mean:.3}");
+        println!("METRIC halfgcd_fixed_depth64_zero_row_id_extra_mean={extra_mean:.3}");
+        println!("METRIC halfgcd_fixed_depth64_zero_row_id_extra_min={extra_min}");
+        println!("METRIC halfgcd_fixed_depth64_zero_row_id_extra_max={extra_max}");
+        println!("METRIC halfgcd_fixed_depth64_zero_row_id_occupied_mean={occupied_mean:.3}");
+        println!("METRIC halfgcd_fixed_depth64_zero_row_id_digits_mean={digit_mean:.3}");
+        println!(
+            "METRIC halfgcd_fixed_depth64_zero_row_id_projected_pointadd_mean={projected_pointadd_mean:.3}"
+        );
+        println!(
+            "METRIC halfgcd_fixed_depth64_zero_row_id_projected_gap_to_2700k={:.3}",
+            projected_pointadd_mean - TARGET
+        );
+        eprintln!(
+            "half-GCD zero-row id floor: active_mean={active_mean:.1}, zero_row_mean={zero_row_mean:.1}, source={zero_row_source_mean:.1}, extra={extra_mean:.1} [{extra_min},{extra_max}], projected_pointadd={projected_pointadd_mean:.1}, occupied={occupied_mean:.1}, digits={digit_mean:.1}"
+        );
+        assert!(
+            projected_pointadd_mean > TARGET,
+            "zero-row id floor now clears 2.7M; replace active predicate blocker with a row-id construction"
         );
     }
 
