@@ -6430,6 +6430,209 @@ mod tests {
     }
 
     #[test]
+    fn raw_pattern_neighbor_context_does_not_clean_a_mask() {
+        // The raw 560-bit pattern stream is already live in the tempting
+        // schedule, so try a stronger local parser before requiring a rank
+        // checkpoint: allow the A-cleanup decoder to inspect adjacent raw
+        // window patterns in addition to the current pattern and post-window
+        // delta.  If two-sided neighbor context still collides, local streaming
+        // cleanup needs nonlocal scan/rank state rather than just a wider local
+        // key.
+        use std::collections::{BTreeMap, BTreeSet};
+
+        const W: usize = 16;
+        const WINDOWS: usize = 35;
+        const NO_PATTERN: u16 = u16::MAX;
+
+        let stats = |rows: &BTreeMap<(usize, u16, u16, u16, i64), BTreeSet<u16>>| {
+            let ambiguous = rows.values().filter(|choices| choices.len() > 1).count();
+            let max_choices = rows.values().map(BTreeSet::len).max().unwrap_or(0);
+            (rows.len(), ambiguous, max_choices)
+        };
+
+        let samples = 10_000usize;
+        let mut sampler = Sampler::new(b"by-raw-pattern-neighbor-a-v1", SECP256K1_P);
+        let mut next_rows = BTreeMap::<(usize, u16, u16, u16, i64), BTreeSet<u16>>::new();
+        let mut two_sided_rows =
+            BTreeMap::<(usize, u16, u16, u16, i64), BTreeSet<u16>>::new();
+        for _ in 0..samples {
+            let x = sampler.next();
+            let mut delta = 1i64;
+            let mut f = SInt::from_u(SECP256K1_P);
+            let mut g = SInt::from_u(x);
+            let mut patterns = Vec::with_capacity(WINDOWS);
+            let mut a_masks = Vec::with_capacity(WINDOWS);
+            let mut delta_outs = Vec::with_capacity(WINDOWS);
+            for _ in 0..WINDOWS {
+                let mut pattern = 0u16;
+                let mut a_mask = 0u16;
+                for bit in 0..W {
+                    let odd = g.bit0();
+                    if odd {
+                        pattern |= 1u16 << bit;
+                    }
+                    if odd && delta > 0 {
+                        a_mask |= 1u16 << bit;
+                    }
+                    divstep_sint_state(&mut delta, &mut f, &mut g);
+                }
+                patterns.push(pattern);
+                a_masks.push(a_mask);
+                delta_outs.push(delta);
+            }
+            for idx in 0..WINDOWS {
+                let prev = if idx == 0 { NO_PATTERN } else { patterns[idx - 1] };
+                let next = if idx + 1 == WINDOWS {
+                    NO_PATTERN
+                } else {
+                    patterns[idx + 1]
+                };
+                next_rows
+                    .entry((idx, NO_PATTERN, patterns[idx], next, delta_outs[idx]))
+                    .or_default()
+                    .insert(a_masks[idx]);
+                two_sided_rows
+                    .entry((idx, prev, patterns[idx], next, delta_outs[idx]))
+                    .or_default()
+                    .insert(a_masks[idx]);
+            }
+        }
+        let (sample_next_keys, sample_next_ambiguous, sample_next_max_choices) =
+            stats(&next_rows);
+        let (sample_twosided_keys, sample_twosided_ambiguous, sample_twosided_max_choices) =
+            stats(&two_sided_rows);
+        println!("METRIC by_raw_pattern_neighbor_sample_next_keys={sample_next_keys}");
+        println!(
+            "METRIC by_raw_pattern_neighbor_sample_next_ambiguous_keys={sample_next_ambiguous}"
+        );
+        println!(
+            "METRIC by_raw_pattern_neighbor_sample_next_max_a_choices={sample_next_max_choices}"
+        );
+        println!("METRIC by_raw_pattern_neighbor_sample_twosided_keys={sample_twosided_keys}");
+        println!(
+            "METRIC by_raw_pattern_neighbor_sample_twosided_ambiguous_keys={sample_twosided_ambiguous}"
+        );
+        println!(
+            "METRIC by_raw_pattern_neighbor_sample_twosided_max_a_choices={sample_twosided_max_choices}"
+        );
+        eprintln!(
+            "BY raw-pattern neighbor A cleanup sample: next ambiguous={sample_next_ambiguous}/{sample_next_keys}, max={sample_next_max_choices}; two-sided ambiguous={sample_twosided_ambiguous}/{sample_twosided_keys}, max={sample_twosided_max_choices}"
+        );
+
+        let cases = [
+            (8usize, 251u16, 4usize),
+            (10usize, 1021u16, 4usize),
+            (12usize, 4093u16, 4usize),
+            (14usize, 16381u16, 4usize),
+        ];
+        let mut largest_toy_next_ambiguous = 0usize;
+        let mut largest_toy_twosided_ambiguous = 0usize;
+        let mut largest_toy_twosided_max_choices = 0usize;
+        for &(n, p, w) in &cases {
+            let windows = (2 * n).div_ceil(w);
+            let mut next_rows = BTreeMap::<(usize, u16, u16, u16, i64), BTreeSet<u16>>::new();
+            let mut two_sided_rows =
+                BTreeMap::<(usize, u16, u16, u16, i64), BTreeSet<u16>>::new();
+            for x in 1..p {
+                let mut delta = 1i64;
+                let mut f = SInt::from_u(U256::from(p as u64));
+                let mut g = SInt::from_u(U256::from(x as u64));
+                let mut patterns = Vec::with_capacity(windows);
+                let mut a_masks = Vec::with_capacity(windows);
+                let mut delta_outs = Vec::with_capacity(windows);
+                for _ in 0..windows {
+                    let mut pattern = 0u16;
+                    let mut a_mask = 0u16;
+                    for bit in 0..w {
+                        let odd = g.bit0();
+                        if odd {
+                            pattern |= 1u16 << bit;
+                        }
+                        if odd && delta > 0 {
+                            a_mask |= 1u16 << bit;
+                        }
+                        divstep_sint_state(&mut delta, &mut f, &mut g);
+                    }
+                    patterns.push(pattern);
+                    a_masks.push(a_mask);
+                    delta_outs.push(delta);
+                }
+                for idx in 0..windows {
+                    let prev = if idx == 0 { NO_PATTERN } else { patterns[idx - 1] };
+                    let next = if idx + 1 == windows {
+                        NO_PATTERN
+                    } else {
+                        patterns[idx + 1]
+                    };
+                    next_rows
+                        .entry((idx, NO_PATTERN, patterns[idx], next, delta_outs[idx]))
+                        .or_default()
+                        .insert(a_masks[idx]);
+                    two_sided_rows
+                        .entry((idx, prev, patterns[idx], next, delta_outs[idx]))
+                        .or_default()
+                        .insert(a_masks[idx]);
+                }
+            }
+            let (next_keys, next_ambiguous, next_max_choices) = stats(&next_rows);
+            let (twosided_keys, twosided_ambiguous, twosided_max_choices) =
+                stats(&two_sided_rows);
+            println!("METRIC by_raw_pattern_neighbor_toy_n{n}_next_keys={next_keys}");
+            println!(
+                "METRIC by_raw_pattern_neighbor_toy_n{n}_next_ambiguous_keys={next_ambiguous}"
+            );
+            println!(
+                "METRIC by_raw_pattern_neighbor_toy_n{n}_next_max_a_choices={next_max_choices}"
+            );
+            println!("METRIC by_raw_pattern_neighbor_toy_n{n}_twosided_keys={twosided_keys}");
+            println!(
+                "METRIC by_raw_pattern_neighbor_toy_n{n}_twosided_ambiguous_keys={twosided_ambiguous}"
+            );
+            println!(
+                "METRIC by_raw_pattern_neighbor_toy_n{n}_twosided_max_a_choices={twosided_max_choices}"
+            );
+            eprintln!(
+                "BY raw-pattern neighbor A cleanup toy: n={n}, w={w}, next ambiguous={next_ambiguous}/{next_keys}, max={next_max_choices}; two-sided ambiguous={twosided_ambiguous}/{twosided_keys}, max={twosided_max_choices}"
+            );
+            largest_toy_next_ambiguous = largest_toy_next_ambiguous.max(next_ambiguous);
+            largest_toy_twosided_ambiguous =
+                largest_toy_twosided_ambiguous.max(twosided_ambiguous);
+            largest_toy_twosided_max_choices =
+                largest_toy_twosided_max_choices.max(twosided_max_choices);
+        }
+        println!(
+            "METRIC by_raw_pattern_neighbor_toy_largest_next_ambiguous_keys={largest_toy_next_ambiguous}"
+        );
+        println!(
+            "METRIC by_raw_pattern_neighbor_toy_largest_twosided_ambiguous_keys={largest_toy_twosided_ambiguous}"
+        );
+        println!(
+            "METRIC by_raw_pattern_neighbor_toy_largest_twosided_max_a_choices={largest_toy_twosided_max_choices}"
+        );
+
+        assert!(
+            sample_twosided_ambiguous > 0 || largest_toy_twosided_ambiguous > 0,
+            "neighbor context recovers A masks; revisit raw-pattern streaming parser"
+        );
+        assert_eq!(
+            sample_next_ambiguous, 684,
+            "sampled next-pattern A ambiguity changed; update the raw-pattern parser ledger"
+        );
+        assert_eq!(
+            sample_twosided_ambiguous, 0,
+            "sampled two-sided neighbor A ambiguity changed; update the raw-pattern parser ledger"
+        );
+        assert_eq!(
+            largest_toy_twosided_ambiguous, 5_281,
+            "exact toy two-sided neighbor A ambiguity changed; update the raw-pattern parser ledger"
+        );
+        assert_eq!(
+            largest_toy_twosided_max_choices, 4,
+            "exact toy two-sided neighbor A choice count changed; update the raw-pattern parser ledger"
+        );
+    }
+
+    #[test]
     fn actual_matrix_sequence_entropy_supports_sub600_history_target() {
         // Storing raw 22-bit (delta,h) keys costs 770 bits for 35 windows, but
         // actual secp256k1 trajectories are highly non-uniform, especially near

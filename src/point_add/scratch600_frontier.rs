@@ -79,7 +79,7 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
             name: "scaled_by_raw_pattern_streaming_parser",
             scratch_bits: 671,
             charged_toffoli: Some(2_701_606),
-            blocker: "raw 560-bit pattern plus single A only fits 663 scratch if the delta parser is non-reversible; sampled reversible delta checkpoint needs 5 bits and 666 scratch, retained A history is p99 218 bits, and two exact clean pattern decoders miss by 1606 before compressed expansion. A post-window-delta cleanup key does not repair this: secp samples have 13866 ambiguous (window,pattern,delta_out) keys, max 6 A choices, and p99 9 rank bits; exact toy n14 still has 267 ambiguous keys and p99 12 rank bits",
+            blocker: "raw 560-bit pattern plus single A only fits 663 scratch if the delta parser is non-reversible; sampled reversible delta checkpoint needs 5 bits and 666 scratch, retained A history is p99 218 bits, and two exact clean pattern decoders miss by 1606 before compressed expansion. A post-window-delta cleanup key does not repair this: secp samples have 13866 ambiguous (window,pattern,delta_out) keys, max 6 A choices, and p99 9 rank bits; exact toy n14 still has 267 ambiguous keys and p99 12 rank bits. Two-sided neighboring raw patterns clear the 10k secp sample, but exact toy n14 has 5281 ambiguous two-sided keys with up to 4 A choices, so the local-neighbor parser is not a proof",
         },
         Candidate {
             name: "scaled_by_h_only_compressed_history_budget",
@@ -379,6 +379,12 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
             + scaled_by_raw_pattern_postdelta_sample_rank_p99;
     let scaled_by_raw_pattern_postdelta_toy_n14_ambiguous_keys = 267usize;
     let scaled_by_raw_pattern_postdelta_toy_n14_rank_p99 = 12usize;
+    let scaled_by_raw_pattern_neighbor_sample_next_ambiguous_keys = 684usize;
+    let scaled_by_raw_pattern_neighbor_sample_twosided_ambiguous_keys = 0usize;
+    let scaled_by_raw_pattern_neighbor_sample_twosided_max_a_choices = 1usize;
+    let scaled_by_raw_pattern_neighbor_toy_n14_next_ambiguous_keys = 2_145usize;
+    let scaled_by_raw_pattern_neighbor_toy_n14_twosided_ambiguous_keys = 5_281usize;
+    let scaled_by_raw_pattern_neighbor_toy_n14_twosided_max_a_choices = 4usize;
     let scaled_by_h_only_model_modular_windows = 35usize;
     let scaled_by_h_only_model_modular_toffoli = 672_650usize;
     let scaled_by_h_only_model_peak = 2_736usize;
@@ -2204,6 +2210,12 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
     println!("METRIC scratch600_scaled_by_raw_pattern_postdelta_sample_rank_scratch={scaled_by_raw_pattern_postdelta_sample_rank_scratch}");
     println!("METRIC scratch600_scaled_by_raw_pattern_postdelta_toy_n14_ambiguous_keys={scaled_by_raw_pattern_postdelta_toy_n14_ambiguous_keys}");
     println!("METRIC scratch600_scaled_by_raw_pattern_postdelta_toy_n14_rank_p99={scaled_by_raw_pattern_postdelta_toy_n14_rank_p99}");
+    println!("METRIC scratch600_scaled_by_raw_pattern_neighbor_sample_next_ambiguous_keys={scaled_by_raw_pattern_neighbor_sample_next_ambiguous_keys}");
+    println!("METRIC scratch600_scaled_by_raw_pattern_neighbor_sample_twosided_ambiguous_keys={scaled_by_raw_pattern_neighbor_sample_twosided_ambiguous_keys}");
+    println!("METRIC scratch600_scaled_by_raw_pattern_neighbor_sample_twosided_max_a_choices={scaled_by_raw_pattern_neighbor_sample_twosided_max_a_choices}");
+    println!("METRIC scratch600_scaled_by_raw_pattern_neighbor_toy_n14_next_ambiguous_keys={scaled_by_raw_pattern_neighbor_toy_n14_next_ambiguous_keys}");
+    println!("METRIC scratch600_scaled_by_raw_pattern_neighbor_toy_n14_twosided_ambiguous_keys={scaled_by_raw_pattern_neighbor_toy_n14_twosided_ambiguous_keys}");
+    println!("METRIC scratch600_scaled_by_raw_pattern_neighbor_toy_n14_twosided_max_a_choices={scaled_by_raw_pattern_neighbor_toy_n14_twosided_max_a_choices}");
     println!("METRIC scratch600_scaled_by_h_only_model_modular_windows={scaled_by_h_only_model_modular_windows}");
     println!("METRIC scratch600_scaled_by_h_only_model_modular_toffoli={scaled_by_h_only_model_modular_toffoli}");
     println!("METRIC scratch600_scaled_by_h_only_model_peak={scaled_by_h_only_model_peak}");
@@ -3624,7 +3636,13 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
             && scaled_by_raw_pattern_postdelta_sample_max_a_choices >= 6
             && scaled_by_raw_pattern_postdelta_sample_rank_scratch > GOOGLE_LOW_QUBIT_SCRATCH
             && scaled_by_raw_pattern_postdelta_toy_n14_ambiguous_keys >= 267
-            && scaled_by_raw_pattern_postdelta_toy_n14_rank_p99 >= 12,
+            && scaled_by_raw_pattern_postdelta_toy_n14_rank_p99 >= 12
+            && scaled_by_raw_pattern_neighbor_sample_next_ambiguous_keys > 0
+            && scaled_by_raw_pattern_neighbor_sample_twosided_ambiguous_keys == 0
+            && scaled_by_raw_pattern_neighbor_sample_twosided_max_a_choices == 1
+            && scaled_by_raw_pattern_neighbor_toy_n14_next_ambiguous_keys >= 2_000
+            && scaled_by_raw_pattern_neighbor_toy_n14_twosided_ambiguous_keys >= 5_000
+            && scaled_by_raw_pattern_neighbor_toy_n14_twosided_max_a_choices >= 4,
         "raw-pattern scaled-BY streaming now has reversible scratch/decode margin; revisit raw history"
     );
     assert!(
