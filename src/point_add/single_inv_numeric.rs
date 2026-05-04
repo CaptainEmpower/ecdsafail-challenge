@@ -24186,6 +24186,219 @@ mod tests {
     }
 
     #[test]
+    fn direct_centered_restoring_final_prefix_bit_reader_toy_prices_cursor_tax() {
+        // The low-branch prefix floor assumes one cheap bit test per prefix
+        // tree node.  This toy keeps that tree cheap, then adds the missing
+        // packed-stream cursor read.  It is intentionally small: if even four
+        // possible cursor positions were over budget, the floor would be dead
+        // before production integration.
+        use sha3::digest::{ExtendableOutput, Update};
+
+        const STREAM_W: usize = 8;
+        const OFFSET_W: usize = 2;
+        const OFFSET_STATES: usize = 1 << OFFSET_W;
+        const MAX_CODE_W: usize = 4;
+        const SYMBOLS: usize = 5;
+        const SYMBOL_W: usize = 3;
+        const LEN_W: usize = 3;
+        const PREFIX_TREE_INTERNAL_NODES: usize = 4;
+        const PREFIX_TREE_NODE_FLOOR_MEAN: f64 = 1_437.531;
+        const PREFIX_TREE_GAP_TO_2700K: f64 = -106_130.130;
+
+        fn decode_prefix_for_toy(stream: u64, offset: usize) -> (usize, usize) {
+            let bit = |k: usize| -> bool { ((stream >> (offset + k)) & 1) != 0 };
+            if !bit(0) {
+                (0, 1)
+            } else if !bit(1) {
+                (1, 2)
+            } else if !bit(2) {
+                (2, 3)
+            } else if !bit(3) {
+                (3, 4)
+            } else {
+                (4, 4)
+            }
+        }
+
+        let symbol_payloads = [0u64, 1, 2, 3, 4];
+        let len_payloads = [1u64, 2, 3, 4, 4];
+        let mut b = super::super::B::new();
+        let stream = b.alloc_qubits(STREAM_W);
+        let offset = b.alloc_qubits(OFFSET_W);
+        let eq_flags = b.alloc_qubits(OFFSET_STATES);
+        let window = b.alloc_qubits(MAX_CODE_W);
+        let prefix_flags = b.alloc_qubits(2);
+        let leaf_flags = b.alloc_qubits(SYMBOLS);
+        let symbol_out = b.alloc_qubits(SYMBOL_W);
+        let len_out = b.alloc_qubits(LEN_W);
+
+        let start = b.ops.len();
+        for state in 0..OFFSET_STATES {
+            for bit in 0..OFFSET_W {
+                if ((state >> bit) & 1) == 0 {
+                    b.x(offset[bit]);
+                }
+            }
+            b.ccx(offset[0], offset[1], eq_flags[state]);
+            for bit in (0..OFFSET_W).rev() {
+                if ((state >> bit) & 1) == 0 {
+                    b.x(offset[bit]);
+                }
+            }
+        }
+        let eq_end = b.ops.len();
+        for state in 0..OFFSET_STATES {
+            for bit in 0..MAX_CODE_W {
+                b.ccx(eq_flags[state], stream[state + bit], window[bit]);
+            }
+        }
+        let read_end = b.ops.len();
+
+        b.x(window[0]);
+        b.cx(window[0], leaf_flags[0]);
+        b.x(window[0]);
+        b.x(window[1]);
+        b.ccx(window[0], window[1], leaf_flags[1]);
+        b.x(window[1]);
+        b.ccx(window[0], window[1], prefix_flags[0]);
+        b.x(window[2]);
+        b.ccx(prefix_flags[0], window[2], leaf_flags[2]);
+        b.x(window[2]);
+        b.ccx(prefix_flags[0], window[2], prefix_flags[1]);
+        b.x(window[3]);
+        b.ccx(prefix_flags[1], window[3], leaf_flags[3]);
+        b.x(window[3]);
+        b.ccx(prefix_flags[1], window[3], leaf_flags[4]);
+        let tree_end = b.ops.len();
+
+        for leaf in 0..SYMBOLS {
+            for bit in 0..SYMBOL_W {
+                if ((symbol_payloads[leaf] >> bit) & 1) != 0 {
+                    b.cx(leaf_flags[leaf], symbol_out[bit]);
+                }
+            }
+            for bit in 0..LEN_W {
+                if ((len_payloads[leaf] >> bit) & 1) != 0 {
+                    b.cx(leaf_flags[leaf], len_out[bit]);
+                }
+            }
+        }
+        emit_inverse_of_existing_ops_for_centered_test(&mut b, start, tree_end);
+
+        let eq_ccx = local_count_ccx_for_plusminus_cost(&b.ops[start..eq_end]);
+        let dynamic_read_ccx = local_count_ccx_for_plusminus_cost(&b.ops[eq_end..read_end]);
+        let reader_forward_ccx = local_count_ccx_for_plusminus_cost(&b.ops[start..read_end]);
+        let tree_forward_ccx = local_count_ccx_for_plusminus_cost(&b.ops[read_end..tree_end]);
+        let full_forward_ccx = local_count_ccx_for_plusminus_cost(&b.ops[start..tree_end]);
+        let roundtrip_ccx = local_count_ccx_for_plusminus_cost(&b.ops[start..]);
+        let peak = b.peak_qubits;
+        let num_qubits = b.next_qubit as usize;
+        let num_bits = b.next_bit as usize;
+        let ops = b.ops;
+        let node_roundtrip_floor = 2 * PREFIX_TREE_INTERNAL_NODES;
+        let tree_over_node_roundtrip =
+            (2 * tree_forward_ccx) as f64 / node_roundtrip_floor as f64;
+        let full_over_node_roundtrip = roundtrip_ccx as f64 / node_roundtrip_floor as f64;
+        let ratio_budget = 1.0
+            + (-PREFIX_TREE_GAP_TO_2700K) / (8.0 * PREFIX_TREE_NODE_FLOOR_MEAN);
+        let tree_only_scaled_gap = PREFIX_TREE_GAP_TO_2700K
+            + 8.0 * PREFIX_TREE_NODE_FLOOR_MEAN * (tree_over_node_roundtrip - 1.0);
+        let cursor_toy_scaled_gap = PREFIX_TREE_GAP_TO_2700K
+            + 8.0 * PREFIX_TREE_NODE_FLOOR_MEAN * (full_over_node_roundtrip - 1.0);
+        let reader_over_tree = reader_forward_ccx as f64 / tree_forward_ccx as f64;
+
+        let mut dirty_restore_cases = 0usize;
+        let mut dirty_history_cases = 0usize;
+        let mut dirty_phase_cases = 0usize;
+        for offset_value in 0u64..OFFSET_STATES as u64 {
+            for stream_value in 0u64..(1u64 << STREAM_W) {
+                let (expected_symbol, expected_len) =
+                    decode_prefix_for_toy(stream_value, offset_value as usize);
+                let mut hasher = sha3::Shake128::default();
+                hasher.update(b"direct-centered-restoring-prefix-bit-reader-toy-v1");
+                let mut xof = hasher.finalize_xof();
+                let mut sim = crate::sim::Simulator::new(num_qubits, num_bits, &mut xof);
+                set_slice_u512_pm(&mut sim, &stream, U512::from(stream_value));
+                set_slice_u512_pm(&mut sim, &offset, U512::from(offset_value));
+                sim.apply(&ops);
+
+                let stream_out = get_slice_u512_pm(&sim, &stream).as_limbs()[0]
+                    & ((1u64 << STREAM_W) - 1);
+                let offset_out = get_slice_u512_pm(&sim, &offset).as_limbs()[0]
+                    & ((1u64 << OFFSET_W) - 1);
+                let symbol_out_value = get_slice_u512_pm(&sim, &symbol_out).as_limbs()[0]
+                    & ((1u64 << SYMBOL_W) - 1);
+                let len_out_value = get_slice_u512_pm(&sim, &len_out).as_limbs()[0]
+                    & ((1u64 << LEN_W) - 1);
+                let dirty_history = get_slice_u512_pm(&sim, &eq_flags).as_limbs()[0] != 0
+                    || get_slice_u512_pm(&sim, &window).as_limbs()[0] != 0
+                    || get_slice_u512_pm(&sim, &prefix_flags).as_limbs()[0] != 0
+                    || get_slice_u512_pm(&sim, &leaf_flags).as_limbs()[0] != 0;
+                dirty_restore_cases +=
+                    (stream_out != stream_value || offset_out != offset_value) as usize;
+                dirty_history_cases += dirty_history as usize;
+                dirty_phase_cases += ((sim.global_phase() & 1) != 0) as usize;
+                assert_eq!(
+                    symbol_out_value, expected_symbol as u64,
+                    "decoded symbol mismatch stream={stream_value} offset={offset_value}"
+                );
+                assert_eq!(
+                    len_out_value, expected_len as u64,
+                    "decoded length mismatch stream={stream_value} offset={offset_value}"
+                );
+            }
+        }
+
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_eq_ccx={eq_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_dynamic_read_ccx={dynamic_read_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_reader_forward_ccx={reader_forward_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_tree_forward_ccx={tree_forward_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_full_forward_ccx={full_forward_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_roundtrip_ccx={roundtrip_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_peak_q={peak}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_cursor_states={OFFSET_STATES}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_internal_nodes={PREFIX_TREE_INTERNAL_NODES}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_reader_over_tree={reader_over_tree:.6}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_tree_over_node_roundtrip={tree_over_node_roundtrip:.6}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_full_over_node_roundtrip={full_over_node_roundtrip:.6}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_roundtrip_ratio_budget={ratio_budget:.6}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_tree_only_scaled_gap_to_2700k={tree_only_scaled_gap:.3}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_cursor_scaled_gap_to_2700k={cursor_toy_scaled_gap:.3}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_dirty_restore_cases={dirty_restore_cases}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_dirty_history_cases={dirty_history_cases}");
+        println!("METRIC centered_direct_restoring_final_prefix_bit_reader_toy_dirty_phase_cases={dirty_phase_cases}");
+        eprintln!(
+            "Direct-centered prefix bit-reader toy: eq={eq_ccx}, read={dynamic_read_ccx}, tree={tree_forward_ccx}, roundtrip={roundtrip_ccx}, peak={peak}, full/node={full_over_node_roundtrip:.3}x, budget={ratio_budget:.3}x, scaled_gap={cursor_toy_scaled_gap:.1}, dirty_restore={dirty_restore_cases}, dirty_history={dirty_history_cases}, dirty_phase={dirty_phase_cases}"
+        );
+        assert_eq!(eq_ccx, OFFSET_STATES, "cursor equality cost drifted");
+        assert_eq!(
+            dynamic_read_ccx,
+            OFFSET_STATES * MAX_CODE_W,
+            "dynamic packed read cost drifted"
+        );
+        assert_eq!(
+            tree_forward_ccx, 6,
+            "prefix bit-test tree cost drifted"
+        );
+        assert_eq!(
+            roundtrip_ccx,
+            2 * full_forward_ccx,
+            "prefix reader cleanup is not pure compute/uncompute"
+        );
+        assert!(
+            tree_only_scaled_gap < -100_000.0,
+            "aligned-window prefix tree no longer preserves the low-branch margin"
+        );
+        assert!(
+            cursor_toy_scaled_gap < 0.0 && full_over_node_roundtrip < ratio_budget,
+            "four-state cursor reader toy no longer fits the low-branch prefix budget"
+        );
+        assert_eq!(dirty_restore_cases, 0, "prefix reader did not restore inputs");
+        assert_eq!(dirty_history_cases, 0, "prefix reader leaked internal history");
+        assert_eq!(dirty_phase_cases, 0, "prefix reader left phase garbage");
+    }
+
+    #[test]
     fn direct_centered_restoring_final_block_joint_rank_bits_are_dense() {
         // The mixed 4..8 block-joint binary-depth floor only helps if the block
         // pattern rank can be decoded phase-cleanly.  Treat the exact toy
