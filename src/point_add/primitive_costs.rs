@@ -95,6 +95,29 @@ fn mul_by_const_acc_chunked_shifts_for_cost(
     b.free_vec(&tmp);
 }
 
+fn mul_by_const_acc_chunked_inplace_src_for_cost(
+    b: &mut B,
+    x: &[QubitId],
+    c: alloy_primitives::U256,
+    acc: &[QubitId],
+    p: alloy_primitives::U256,
+) {
+    let mut positions = Vec::new();
+    for i in 0..256 {
+        if super::bit(c, i) {
+            positions.push(i);
+        }
+    }
+    let mut undo = Vec::new();
+    let mut cur = 0usize;
+    for pos in positions {
+        shift_tmp_up_for_sparse_const_cost(b, x, p, pos - cur, &mut undo);
+        cur = pos;
+        mod_add_qq(b, acc, x, p);
+    }
+    undo_sparse_const_shifts_for_cost(b, x, p, undo);
+}
+
 fn count_ccx(ops: &[crate::circuit::Op]) -> usize {
     ops.iter()
         .filter(|o| matches!(o.kind, OperationType::CCX | OperationType::CCZ))
@@ -646,10 +669,11 @@ fn chunked_shift_prescaler_reopens_small_scale_absorption_but_not_qubit_gate() {
     // jumps between sparse set-bit positions with the Solinas k-bit shifter
     // instead of walking through every intermediate double.  This beats the old
     // mixed prescaler locally and is just below the correction-loop cost for the
-    // current pair1/pair2 iteration counts.  Full folded integration is
-    // phase-clean and reaches 4,065,906 average executed Toffoli, but currently
-    // peaks at 3153q (LOWQ_SHIFT22=1 is worse: 4,194,666 / 3152q), so this is an
-    // env-gated structural primitive rather than a promotable default path.
+    // current pair1/pair2 iteration counts.  Borrowing the source register as
+    // the moving shift lane removes the field-sized temp and lowers folded
+    // integration from 3153q to 2897q at the same 4,065,906 average executed
+    // Toffoli.  Reusing prescaler scratch as Kaliski state is phase-unsafe, so
+    // this remains an env-gated primitive rather than a promotable default path.
     use super::*;
     let p = SECP256K1_P;
     let x = B::new();
@@ -673,6 +697,14 @@ fn chunked_shift_prescaler_reopens_small_scale_absorption_but_not_qubit_gate() {
         let chunked_peak = b.peak_qubits as usize;
 
         let mut b = B::new();
+        let src = b.alloc_qubits(N);
+        let acc = b.alloc_qubits(N);
+        let start = b.ops.len();
+        mul_by_const_acc_chunked_inplace_src_for_cost(&mut b, &src, scale, &acc, p);
+        let inplace_ccx = count_ccx(&b.ops[start..]);
+        let inplace_peak = b.peak_qubits as usize;
+
+        let mut b = B::new();
         let v = b.alloc_qubits(N);
         let start = b.ops.len();
         for _ in 0..iters {
@@ -683,17 +715,20 @@ fn chunked_shift_prescaler_reopens_small_scale_absorption_but_not_qubit_gate() {
             }
         }
         let correction_loop_ccx = count_ccx(&b.ops[start..]);
-        let projected_delta = 2isize * chunked_ccx as isize - correction_loop_ccx as isize;
+        let projected_delta = 2isize * inplace_ccx as isize - correction_loop_ccx as isize;
         eprintln!(
-            "{label} scale prescaler: mixed_ccx={mixed_ccx}, chunked_ccx={chunked_ccx}, correction_loop_ccx={correction_loop_ccx}, projected_delta={projected_delta}"
+            "{label} scale prescaler: mixed_ccx={mixed_ccx}, chunked_ccx={chunked_ccx}, inplace_ccx={inplace_ccx}, correction_loop_ccx={correction_loop_ccx}, projected_delta={projected_delta}"
         );
         println!("METRIC scale_absorb_{label}_mixed_prescale_ccx={mixed_ccx}");
         println!("METRIC scale_absorb_{label}_mixed_prescale_peak_qubits={mixed_peak}");
         println!("METRIC scale_absorb_{label}_chunked_prescale_ccx={chunked_ccx}");
         println!("METRIC scale_absorb_{label}_chunked_prescale_peak_qubits={chunked_peak}");
+        println!("METRIC scale_absorb_{label}_chunked_inplace_prescale_ccx={inplace_ccx}");
+        println!("METRIC scale_absorb_{label}_chunked_inplace_prescale_peak_qubits={inplace_peak}");
         println!("METRIC scale_absorb_{label}_correction_loop_ccx={correction_loop_ccx}");
-        println!("METRIC scale_absorb_{label}_chunked_projected_delta={projected_delta}");
-        assert!(chunked_ccx < mixed_ccx / 2, "chunked sparse shifts should strongly improve the local prescaler");
+        println!("METRIC scale_absorb_{label}_chunked_inplace_projected_delta={projected_delta}");
+        assert!(inplace_ccx < mixed_ccx / 2, "chunked sparse shifts should strongly improve the local prescaler");
+        assert!(inplace_peak < chunked_peak, "in-place source schedule should remove the tmp-register peak");
         assert!(projected_delta < 0, "chunked compute+uncompute should beat the deleted correction loop locally");
     }
 }
