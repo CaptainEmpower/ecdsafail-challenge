@@ -25667,6 +25667,273 @@ mod tests {
     }
 
     #[test]
+    fn direct_centered_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_cleans() {
+        // Recompute the parser controls and apply the opposite selected
+        // add/sub to prove the arithmetic update can be reversed without
+        // keeping decoded symbols or shifted coefficient temps live.
+        use sha3::digest::{ExtendableOutput, Update};
+
+        const STREAM_W: usize = 8;
+        const MAX_CODE_W: usize = 4;
+        const SYMBOLS: usize = 5;
+        const COEFF_W: usize = 3;
+        const ACC_W: usize = COEFF_W + SYMBOLS - 1;
+        const PREFIX_TREE_INTERNAL_NODES: usize = 4;
+        const BLOCK_SYMBOLS: usize = 2;
+        const PREFIX_TREE_NODE_FLOOR_MEAN: f64 = 1_437.531;
+        const PREFIX_TREE_GAP_TO_2700K: f64 = -106_130.130;
+
+        fn emit_prefix_tree_for_roundtrip_toy(
+            b: &mut super::super::B,
+            window: &[super::super::QubitId],
+            prefix_flags: &[super::super::QubitId],
+            leaf_flags: &[super::super::QubitId],
+        ) {
+            b.x(window[0]);
+            b.cx(window[0], leaf_flags[0]);
+            b.x(window[0]);
+            b.x(window[1]);
+            b.ccx(window[0], window[1], leaf_flags[1]);
+            b.x(window[1]);
+            b.ccx(window[0], window[1], prefix_flags[0]);
+            b.x(window[2]);
+            b.ccx(prefix_flags[0], window[2], leaf_flags[2]);
+            b.x(window[2]);
+            b.ccx(prefix_flags[0], window[2], prefix_flags[1]);
+            b.x(window[3]);
+            b.ccx(prefix_flags[1], window[3], leaf_flags[3]);
+            b.x(window[3]);
+            b.ccx(prefix_flags[1], window[3], leaf_flags[4]);
+        }
+
+        fn emit_selected_shift_materialize_for_roundtrip_toy(
+            b: &mut super::super::B,
+            leaves: &[super::super::QubitId],
+            coeff: &[super::super::QubitId],
+            shifted: &[super::super::QubitId],
+        ) {
+            for (shift, &leaf) in leaves.iter().enumerate() {
+                for bit in 0..coeff.len() {
+                    b.ccx(leaf, coeff[bit], shifted[shift + bit]);
+                }
+            }
+        }
+
+        fn emit_block2_selected_addsub_update_for_roundtrip_toy(
+            b: &mut super::super::B,
+            stream: &[super::super::QubitId],
+            coeff: &[super::super::QubitId],
+            acc: &[super::super::QubitId],
+            sign: super::super::QubitId,
+            shifted: &[super::super::QubitId],
+            window1: &[super::super::QubitId],
+            prefix1: &[super::super::QubitId],
+            leaf1: &[super::super::QubitId],
+            len4_ctrl: super::super::QubitId,
+            window2: &[super::super::QubitId],
+            prefix2: &[super::super::QubitId],
+            leaf2: &[super::super::QubitId],
+            invert_sign: bool,
+        ) -> (usize, usize, usize, usize) {
+            let start = b.ops.len();
+            for bit in 0..MAX_CODE_W {
+                b.cx(stream[bit], window1[bit]);
+            }
+            emit_prefix_tree_for_roundtrip_toy(b, window1, prefix1, leaf1);
+            b.cx(leaf1[3], len4_ctrl);
+            b.cx(leaf1[4], len4_ctrl);
+            let read_ctrls = [leaf1[0], leaf1[1], leaf1[2], len4_ctrl];
+            for (pos, &ctrl) in (1usize..=4usize).zip(read_ctrls.iter()) {
+                for bit in 0..MAX_CODE_W {
+                    b.ccx(ctrl, stream[pos + bit], window2[bit]);
+                }
+            }
+            emit_prefix_tree_for_roundtrip_toy(b, window2, prefix2, leaf2);
+            let decode_end = b.ops.len();
+
+            if invert_sign {
+                b.x(sign);
+            }
+            let select1_start = b.ops.len();
+            emit_selected_shift_materialize_for_roundtrip_toy(b, leaf1, coeff, shifted);
+            let add1_start = b.ops.len();
+            emit_fused_sign_controlled_addsub_digit_for_centered_test(b, acc, shifted, sign);
+            let add1_end = b.ops.len();
+            emit_selected_shift_materialize_for_roundtrip_toy(b, leaf1, coeff, shifted);
+            let select1_end = b.ops.len();
+
+            let select2_start = b.ops.len();
+            emit_selected_shift_materialize_for_roundtrip_toy(b, leaf2, coeff, shifted);
+            let add2_start = b.ops.len();
+            emit_fused_sign_controlled_addsub_digit_for_centered_test(b, acc, shifted, sign);
+            let add2_end = b.ops.len();
+            emit_selected_shift_materialize_for_roundtrip_toy(b, leaf2, coeff, shifted);
+            let select2_end = b.ops.len();
+            if invert_sign {
+                b.x(sign);
+            }
+
+            emit_inverse_of_existing_ops_for_centered_test(b, start, decode_end);
+
+            let decode_forward_ccx = local_count_ccx_for_plusminus_cost(&b.ops[start..decode_end]);
+            let select_shift_ccx =
+                local_count_ccx_for_plusminus_cost(&b.ops[select1_start..add1_start])
+                    + local_count_ccx_for_plusminus_cost(&b.ops[add1_end..select1_end])
+                    + local_count_ccx_for_plusminus_cost(&b.ops[select2_start..add2_start])
+                    + local_count_ccx_for_plusminus_cost(&b.ops[add2_end..select2_end]);
+            let addsub_ccx = local_count_ccx_for_plusminus_cost(&b.ops[add1_start..add1_end])
+                + local_count_ccx_for_plusminus_cost(&b.ops[add2_start..add2_end]);
+            let total_ccx = local_count_ccx_for_plusminus_cost(&b.ops[start..]);
+            (decode_forward_ccx, select_shift_ccx, addsub_ccx, total_ccx)
+        }
+
+        let mut b = super::super::B::new();
+        let stream = b.alloc_qubits(STREAM_W);
+        let coeff = b.alloc_qubits(COEFF_W);
+        let acc = b.alloc_qubits(ACC_W);
+        let sign = b.alloc_qubit();
+        let shifted = b.alloc_qubits(ACC_W);
+        let window1 = b.alloc_qubits(MAX_CODE_W);
+        let prefix1 = b.alloc_qubits(2);
+        let leaf1 = b.alloc_qubits(SYMBOLS);
+        let len4_ctrl = b.alloc_qubit();
+        let window2 = b.alloc_qubits(MAX_CODE_W);
+        let prefix2 = b.alloc_qubits(2);
+        let leaf2 = b.alloc_qubits(SYMBOLS);
+
+        let start = b.ops.len();
+        let (forward_decode_ccx, forward_select_shift_ccx, forward_addsub_ccx, forward_ccx) =
+            emit_block2_selected_addsub_update_for_roundtrip_toy(
+                &mut b, &stream, &coeff, &acc, sign, &shifted, &window1, &prefix1, &leaf1,
+                len4_ctrl, &window2, &prefix2, &leaf2, false,
+            );
+        let (reverse_decode_ccx, reverse_select_shift_ccx, reverse_addsub_ccx, reverse_ccx) =
+            emit_block2_selected_addsub_update_for_roundtrip_toy(
+                &mut b, &stream, &coeff, &acc, sign, &shifted, &window1, &prefix1, &leaf1,
+                len4_ctrl, &window2, &prefix2, &leaf2, true,
+            );
+        let arithmetic_ccx = forward_select_shift_ccx
+            + forward_addsub_ccx
+            + reverse_select_shift_ccx
+            + reverse_addsub_ccx;
+        let total_ccx = local_count_ccx_for_plusminus_cost(&b.ops[start..]);
+        let parser_transient_ccx = total_ccx - arithmetic_ccx;
+        let peak = b.peak_qubits;
+        let node_roundtrip_floor = 2 * PREFIX_TREE_INTERNAL_NODES * BLOCK_SYMBOLS * 2;
+        let parser_over_node_roundtrip =
+            parser_transient_ccx as f64 / node_roundtrip_floor as f64;
+        let arithmetic_over_node_roundtrip =
+            arithmetic_ccx as f64 / node_roundtrip_floor as f64;
+        let total_over_node_roundtrip = total_ccx as f64 / node_roundtrip_floor as f64;
+        let ratio_budget = 1.0
+            + (-PREFIX_TREE_GAP_TO_2700K) / (8.0 * PREFIX_TREE_NODE_FLOOR_MEAN);
+        let parser_scaled_gap = PREFIX_TREE_GAP_TO_2700K
+            + 8.0 * PREFIX_TREE_NODE_FLOOR_MEAN * (parser_over_node_roundtrip - 1.0);
+        let total_scaled_gap = PREFIX_TREE_GAP_TO_2700K
+            + 8.0 * PREFIX_TREE_NODE_FLOOR_MEAN * (total_over_node_roundtrip - 1.0);
+
+        let num_qubits = b.next_qubit as usize;
+        let num_bits = b.next_bit as usize;
+        let ops = b.ops;
+        let mut dirty_restore_cases = 0usize;
+        let mut dirty_history_cases = 0usize;
+        let mut dirty_phase_cases = 0usize;
+        let stream_mask = (1u64 << STREAM_W) - 1;
+        let coeff_mask = (1u64 << COEFF_W) - 1;
+        let acc_mask = (1u64 << ACC_W) - 1;
+        for stream_value in 0u64..(1u64 << STREAM_W) {
+            for sign_value in 0u64..2 {
+                for coeff_value in 0u64..(1u64 << COEFF_W) {
+                    for acc_value in 0u64..(1u64 << ACC_W) {
+                        let mut hasher = sha3::Shake128::default();
+                        hasher.update(
+                            b"direct-centered-restoring-prefix-block2-selected-addsub-roundtrip-toy-v1",
+                        );
+                        let mut xof = hasher.finalize_xof();
+                        let mut sim = crate::sim::Simulator::new(num_qubits, num_bits, &mut xof);
+                        set_slice_u512_pm(&mut sim, &stream, U512::from(stream_value));
+                        set_slice_u512_pm(&mut sim, &coeff, U512::from(coeff_value));
+                        set_slice_u512_pm(&mut sim, &acc, U512::from(acc_value));
+                        *sim.qubit_mut(sign) = sign_value;
+                        sim.apply(&ops);
+
+                        let stream_out =
+                            get_slice_u512_pm(&sim, &stream).as_limbs()[0] & stream_mask;
+                        let coeff_out = get_slice_u512_pm(&sim, &coeff).as_limbs()[0] & coeff_mask;
+                        let acc_out = get_slice_u512_pm(&sim, &acc).as_limbs()[0] & acc_mask;
+                        let dirty_history = get_slice_u512_pm(&sim, &shifted).as_limbs()[0] != 0
+                            || get_slice_u512_pm(&sim, &window1).as_limbs()[0] != 0
+                            || get_slice_u512_pm(&sim, &prefix1).as_limbs()[0] != 0
+                            || get_slice_u512_pm(&sim, &leaf1).as_limbs()[0] != 0
+                            || (sim.qubit(len4_ctrl) & 1) != 0
+                            || get_slice_u512_pm(&sim, &window2).as_limbs()[0] != 0
+                            || get_slice_u512_pm(&sim, &prefix2).as_limbs()[0] != 0
+                            || get_slice_u512_pm(&sim, &leaf2).as_limbs()[0] != 0;
+                        dirty_restore_cases += (stream_out != stream_value
+                            || coeff_out != coeff_value
+                            || acc_out != acc_value
+                            || (sim.qubit(sign) as u64) != sign_value)
+                            as usize;
+                        dirty_history_cases += dirty_history as usize;
+                        dirty_phase_cases += ((sim.global_phase() & 1) != 0) as usize;
+                    }
+                }
+            }
+        }
+
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_forward_decode_ccx={forward_decode_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_reverse_decode_ccx={reverse_decode_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_forward_select_shift_ccx={forward_select_shift_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_reverse_select_shift_ccx={reverse_select_shift_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_forward_addsub_ccx={forward_addsub_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_reverse_addsub_ccx={reverse_addsub_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_forward_ccx={forward_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_reverse_ccx={reverse_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_arithmetic_ccx={arithmetic_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_parser_transient_ccx={parser_transient_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_total_ccx={total_ccx}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_peak_q={peak}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_parser_over_node_roundtrip={parser_over_node_roundtrip:.6}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_arithmetic_over_node_roundtrip={arithmetic_over_node_roundtrip:.6}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_total_over_node_roundtrip={total_over_node_roundtrip:.6}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_roundtrip_ratio_budget={ratio_budget:.6}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_parser_scaled_gap_to_2700k={parser_scaled_gap:.3}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_total_scaled_gap_to_2700k={total_scaled_gap:.3}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_dirty_restore_cases={dirty_restore_cases}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_dirty_history_cases={dirty_history_cases}");
+        println!("METRIC centered_direct_restoring_final_prefix_block2_selected_addsub_roundtrip_toy_dirty_phase_cases={dirty_phase_cases}");
+        eprintln!(
+            "Direct-centered prefix block2 selected-addsub roundtrip toy: forward={forward_ccx}, reverse={reverse_ccx}, arithmetic={arithmetic_ccx}, parser_transient={parser_transient_ccx}, total={total_ccx}, peak={peak}, total/node={total_over_node_roundtrip:.3}x, budget={ratio_budget:.3}x, total_scaled_gap={total_scaled_gap:.1}, dirty_restore={dirty_restore_cases}, dirty_history={dirty_history_cases}, dirty_phase={dirty_phase_cases}"
+        );
+        assert_eq!(forward_decode_ccx, 28, "roundtrip forward decode cost drifted");
+        assert_eq!(reverse_decode_ccx, 28, "roundtrip reverse decode cost drifted");
+        assert_eq!(
+            forward_select_shift_ccx, 60,
+            "roundtrip forward selected-shift cost drifted"
+        );
+        assert_eq!(
+            reverse_select_shift_ccx, 60,
+            "roundtrip reverse selected-shift cost drifted"
+        );
+        assert_eq!(forward_addsub_ccx, 12, "roundtrip forward add/sub cost drifted");
+        assert_eq!(reverse_addsub_ccx, 12, "roundtrip reverse add/sub cost drifted");
+        assert_eq!(forward_ccx, 128, "roundtrip forward update cost drifted");
+        assert_eq!(reverse_ccx, 128, "roundtrip reverse update cost drifted");
+        assert_eq!(arithmetic_ccx, 144, "roundtrip arithmetic cost drifted");
+        assert_eq!(parser_transient_ccx, 112, "roundtrip parser transient cost drifted");
+        assert_eq!(total_ccx, 256, "roundtrip total cost drifted");
+        assert!(
+            parser_scaled_gap < -70_000.0
+                && total_scaled_gap < -20_000.0
+                && total_over_node_roundtrip < ratio_budget,
+            "block2 selected-addsub roundtrip no longer fits the low-branch margin"
+        );
+        assert_eq!(dirty_restore_cases, 0, "selected-addsub roundtrip did not restore inputs");
+        assert_eq!(dirty_history_cases, 0, "selected-addsub roundtrip leaked history");
+        assert_eq!(dirty_phase_cases, 0, "selected-addsub roundtrip left phase garbage");
+    }
+
+    #[test]
     fn direct_centered_restoring_final_block_joint_rank_bits_are_dense() {
         // The mixed 4..8 block-joint binary-depth floor only helps if the block
         // pattern rank can be decoded phase-cleanly.  Treat the exact toy
