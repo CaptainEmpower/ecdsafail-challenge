@@ -151,7 +151,7 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
             name: "halfgcd_second_column_fixed_depth64_tail_stream",
             scratch_bits: 515,
             charged_toffoli: Some(2_740_870),
-            blocker: "fixed-depth64 sampled 5-bit tail barrel averages 2663148, but adversarial q_bits=169 forces an exact fallback; one extra width-pass fits at 2689056, two misses at 2714963, and generic 8-bit alignment is 2740870",
+            blocker: "fixed-depth64 sampled 5-bit prefix/decoder alignment plus full tail averages 2500182, but exact high-quotient prefix fallback is unbuilt; fully generic 8-bit alignment is the charged 2740870 row",
         },
         Candidate {
             name: "folded_kaliski_one_pair_plus_required_sidecar",
@@ -479,6 +479,12 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
     let halfgcd_second_col_prefix_active_model_over_exact_mean = 1_125_095usize;
     let halfgcd_second_col_prefix_active_model_over_exact_p99 = 1_177_392usize;
     let halfgcd_second_col_fixed_depth64_scratch_p99 = 515usize;
+    let halfgcd_second_col_fixed_depth64_prefix_extract_width_sum_p99 = 16_504usize;
+    let halfgcd_second_col_fixed_depth64_prefix_max_digits_p99 = 14usize;
+    let halfgcd_second_col_fixed_depth64_prefix_bounded_barrel_bits = 5usize;
+    let halfgcd_second_col_fixed_depth64_decoder_width_sum_p99 = 4_592usize;
+    let halfgcd_second_col_fixed_depth64_decoder_max_digits_p99 = 14usize;
+    let halfgcd_second_col_fixed_depth64_decoder_bounded_barrel_bits = 5usize;
     let halfgcd_second_col_fixed_depth64_tail_bits_p99 = 225usize;
     let halfgcd_second_col_fixed_depth64_tail_count_p99 = 108usize;
     let halfgcd_second_col_fixed_depth64_tail_width_sum_p99 = 9_136usize;
@@ -528,6 +534,13 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
             - GOOGLE_LOW_QUBIT_TOFFOLI as isize;
     let halfgcd_second_col_fixed_depth64_noscan_tail_logbarrel_mean = 2_612_728usize;
     let halfgcd_second_col_fixed_depth64_noscan_tail_logbarrel_p99 = 2_706_032usize;
+    let halfgcd_second_col_fixed_depth64_exact_prefix_bounded_tail_logbarrel_mean =
+        2_500_182usize;
+    let halfgcd_second_col_fixed_depth64_exact_prefix_bounded_tail_logbarrel_p99 =
+        2_585_888usize;
+    let halfgcd_second_col_fixed_depth64_exact_prefix_bounded_tail_logbarrel_gap =
+        halfgcd_second_col_fixed_depth64_exact_prefix_bounded_tail_logbarrel_mean as isize
+            - GOOGLE_LOW_QUBIT_TOFFOLI as isize;
 
     eprintln!("\nScratch-600 architecture frontier:");
     for c in candidates {
@@ -822,6 +835,12 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
     println!("METRIC scratch600_halfgcd_second_col_prefix_active_model_over_exact_mean={halfgcd_second_col_prefix_active_model_over_exact_mean}");
     println!("METRIC scratch600_halfgcd_second_col_prefix_active_model_over_exact_p99={halfgcd_second_col_prefix_active_model_over_exact_p99}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_scratch_p99={halfgcd_second_col_fixed_depth64_scratch_p99}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_prefix_extract_width_sum_p99={halfgcd_second_col_fixed_depth64_prefix_extract_width_sum_p99}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_prefix_max_digits_p99={halfgcd_second_col_fixed_depth64_prefix_max_digits_p99}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_prefix_bounded_barrel_bits={halfgcd_second_col_fixed_depth64_prefix_bounded_barrel_bits}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_decoder_width_sum_p99={halfgcd_second_col_fixed_depth64_decoder_width_sum_p99}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_decoder_max_digits_p99={halfgcd_second_col_fixed_depth64_decoder_max_digits_p99}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_decoder_bounded_barrel_bits={halfgcd_second_col_fixed_depth64_decoder_bounded_barrel_bits}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_tail_bits_p99={halfgcd_second_col_fixed_depth64_tail_bits_p99}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_tail_count_p99={halfgcd_second_col_fixed_depth64_tail_count_p99}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_tail_width_sum_p99={halfgcd_second_col_fixed_depth64_tail_width_sum_p99}");
@@ -857,6 +876,9 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_tail_logbarrel_gap_to_2700k={halfgcd_second_col_fixed_depth64_exact_tail_logbarrel_gap}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_noscan_tail_logbarrel_mean={halfgcd_second_col_fixed_depth64_noscan_tail_logbarrel_mean}");
     println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_noscan_tail_logbarrel_p99={halfgcd_second_col_fixed_depth64_noscan_tail_logbarrel_p99}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_prefix_bounded_tail_logbarrel_mean={halfgcd_second_col_fixed_depth64_exact_prefix_bounded_tail_logbarrel_mean}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_prefix_bounded_tail_logbarrel_p99={halfgcd_second_col_fixed_depth64_exact_prefix_bounded_tail_logbarrel_p99}");
+    println!("METRIC scratch600_halfgcd_second_col_fixed_depth64_exact_prefix_bounded_tail_logbarrel_gap_to_2700k={halfgcd_second_col_fixed_depth64_exact_prefix_bounded_tail_logbarrel_gap}");
 
     assert!(best_state <= STRICT_SCRATCH, "at least some state shapes fit");
     assert!(streamed_gap_to_google > 0, "no fully charged <=600-scratch row should be counted as solved yet");
@@ -1133,6 +1155,8 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
     );
     assert!(
         halfgcd_second_col_fixed_depth64_scratch_p99 < GOOGLE_LOW_QUBIT_SCRATCH
+            && halfgcd_second_col_fixed_depth64_prefix_bounded_barrel_bits < 8
+            && halfgcd_second_col_fixed_depth64_decoder_bounded_barrel_bits < 8
             && halfgcd_second_col_fixed_depth64_exact_mean < GOOGLE_LOW_QUBIT_TOFFOLI
             && halfgcd_second_col_fixed_depth64_exact_p99 < GOOGLE_LOW_QUBIT_TOFFOLI
             && halfgcd_second_col_fixed_depth64_exact_tail_floor_gap < 0
@@ -1154,7 +1178,10 @@ fn scratch600_frontier_requires_selector_or_parser_breakthrough() {
             && halfgcd_second_col_fixed_depth64_noscan_tail_logbarrel_mean
                 < GOOGLE_LOW_QUBIT_TOFFOLI
             && halfgcd_second_col_fixed_depth64_noscan_tail_logbarrel_p99
-                > GOOGLE_LOW_QUBIT_TOFFOLI,
+                > GOOGLE_LOW_QUBIT_TOFFOLI
+            && halfgcd_second_col_fixed_depth64_exact_prefix_bounded_tail_logbarrel_gap < 0
+            && halfgcd_second_col_fixed_depth64_exact_prefix_bounded_tail_logbarrel_p99
+                < GOOGLE_LOW_QUBIT_TOFFOLI,
         "half-GCD fixed-depth64 tail-alignment frontier changed; revisit tail parser priority"
     );
 }
