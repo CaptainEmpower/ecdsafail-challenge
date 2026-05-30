@@ -1200,6 +1200,83 @@ fn cadd_nbit_const_direct_fast(b: &mut B, acc: &[QubitId], c: U256, ctrl: QubitI
     b.free_vec(&carries);
 }
 
+/// Genuinely-unconditional register-free add of classical constant `c` into `acc`.
+/// ctrl≡1 specialization of `cadd_nbit_const_direct_fast`: forward control
+/// Toffolis collapse to free CX (recovering ~13 CCX/call for c=2^32+977); a |1>
+/// helper is kept only for the (free) CZ carry-uncompute fixups. Phase-clean.
+fn add_nbit_const_direct_fast(b: &mut B, acc: &[QubitId], c: U256) {
+    let n = acc.len();
+    if n == 0 {
+        return;
+    }
+    if n == 1 {
+        if bit(c, 0) {
+            b.x(acc[0]);
+        }
+        return;
+    }
+
+    let one = b.alloc_qubit();
+    b.x(one);
+
+    let carries = b.alloc_qubits(n - 1);
+
+    // Forward carry sweep. carry_{i+1} = majority(acc_i, c_i, carry_i).
+    for i in 0..n - 1 {
+        let target = carries[i];
+        let carry_in = if i == 0 { None } else { Some(carries[i - 1]) };
+        if bit(c, i) {
+            if let Some(ci) = carry_in {
+                // OR(acc_i, ci) = (acc_i & ci) ^ acc_i ^ ci.
+                b.cx(acc[i], target);
+                b.ccx(acc[i], ci, target);
+                b.cx(ci, target);
+            } else {
+                b.cx(acc[i], target);
+            }
+        } else if let Some(ci) = carry_in {
+            b.ccx(acc[i], ci, target);
+        }
+    }
+
+    // Sum bits: acc_i ^= c_i ^ carry_i.
+    for i in 0..n {
+        if bit(c, i) {
+            b.x(acc[i]);
+        }
+        if i > 0 {
+            b.cx(carries[i - 1], acc[i]);
+        }
+    }
+
+    // Measurement-uncompute carries in reverse (ctrl ≡ `one`; Clifford-only).
+    for i in (0..n - 1).rev() {
+        let m = b.alloc_bit();
+        b.hmr(carries[i], m);
+        let carry_in = if i == 0 { None } else { Some(carries[i - 1]) };
+        if bit(c, i) {
+            b.x(acc[i]);
+            if let Some(ci) = carry_in {
+                b.cz_if(acc[i], one, m);
+                b.cz_if(acc[i], ci, m);
+                b.x(acc[i]);
+                b.cz_if(one, ci, m);
+            } else {
+                b.cz_if(acc[i], one, m);
+                b.x(acc[i]);
+            }
+        } else if let Some(ci) = carry_in {
+            b.x(acc[i]);
+            b.cz_if(acc[i], ci, m);
+            b.x(acc[i]);
+        }
+    }
+
+    b.free_vec(&carries);
+    b.x(one);
+    b.free(one);
+}
+
 fn add_nbit_const_fast(b: &mut B, acc: &[QubitId], c: U256) {
     let n = acc.len();
     let a = load_const(b, n, c);
@@ -1937,13 +2014,8 @@ fn mod_add_qq_fast_lowscratch(b: &mut B, acc: &[QubitId], a: &[QubitId], p: U256
     add_nbit_qq_fast(b, &a_ext, &acc_ext);
 
     let c = U256::MAX.wrapping_sub(p).wrapping_add(U256::from(1));
-    // Step 2: unconditional +c via register-free direct const add. A |1> control
-    // makes the controlled primitive unconditional (X/CX/CZ are free Cliffords).
-    let one = b.alloc_qubit();
-    b.x(one);
-    cadd_nbit_const_direct_fast(b, &acc_ext, c, one);
-    b.x(one);
-    b.free(one);
+    // Step 2: genuinely-unconditional +c (register-free, no control bit).
+    add_nbit_const_direct_fast(b, &acc_ext, c);
 
     let flag = b.alloc_qubit();
     b.cx(acc_ovf, flag);
@@ -1976,11 +2048,7 @@ fn mod_add_qq_fast_from_zero_lowscratch(b: &mut B, acc: &[QubitId], a: &[QubitId
     }
 
     let c = U256::MAX.wrapping_sub(p).wrapping_add(U256::from(1));
-    let one = b.alloc_qubit();
-    b.x(one);
-    cadd_nbit_const_direct_fast(b, &acc_ext, c, one);
-    b.x(one);
-    b.free(one);
+    add_nbit_const_direct_fast(b, &acc_ext, c);
 
     let flag = b.alloc_qubit();
     b.cx(acc_ovf, flag);
