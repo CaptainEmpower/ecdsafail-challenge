@@ -411,6 +411,23 @@ fn point_add_karatsuba_enabled() -> bool {
     env_flag_enabled("POINT_ADD_KARATSUBA", true)
 }
 
+// Exhaustive-audit Toffoli wins (2026-05-30). Each defaults ON once verified.
+// Gated independently so the adversary can bisect a rejection by flipping one
+// gate to "0".
+fn audit_shift22_pos0_cx() -> bool {
+    env_flag_enabled("AUDIT_SHIFT22_POS0_CX", true)
+}
+
+// AUDIT GROUP A: Solinas-fold call-site primitive swaps. The pos-32
+// `mod_add_qq`/`mod_sub_qq` slow folds (bracketed by mod_shift_left/right_by_k)
+// become the low-scratch fast variants — same operands, fewer Toffoli, fewer
+// scratch (register-free direct const correction => peak-neutral/lower). NOT
+// applied to the pair1 sister mod_mul_write_into_zero_acc_karatsuba_with_tmp_ext
+// pos-32 add, which is intentionally slow to protect the 2708 peak.
+fn audit_sol_folds() -> bool {
+    env_flag_enabled("AUDIT_SOL_FOLDS", true)
+}
+
 fn pair1_mul1_karatsuba_enabled(n: usize) -> bool {
     let min_n = std::env::var("POINT_ADD_KARATSUBA_MIN_N")
         .ok()
@@ -745,6 +762,28 @@ fn mod_sub_qq(b: &mut B, acc: &[QubitId], a: &[QubitId], p: U256) {
     // (every ancilla is driven to |0⟩ before its R).
     let a_copy: Vec<QubitId> = a.to_vec();
     emit_inverse(b, move |b| mod_add_qq(b, acc, &a_copy, p));
+}
+
+// AUDIT GROUP A dispatch: the pos-32 Solinas fold add/sub. Slow `mod_add_qq`
+// becomes the register-free low-scratch fast variant when the gate is on.
+// Defined here (forward-declares mod_add_qq_fast_lowscratch / mod_sub_qq_fast
+// which live below) so all fold call sites share one substitution point.
+#[inline]
+fn sol_fold_add_qq(b: &mut B, acc: &[QubitId], a: &[QubitId], p: U256) {
+    if audit_sol_folds() {
+        mod_add_qq_fast_lowscratch(b, acc, a, p);
+    } else {
+        mod_add_qq(b, acc, a, p);
+    }
+}
+
+#[inline]
+fn sol_fold_sub_qq(b: &mut B, acc: &[QubitId], a: &[QubitId], p: U256) {
+    if audit_sol_folds() {
+        mod_sub_qq_fast(b, acc, a, p);
+    } else {
+        mod_sub_qq(b, acc, a, p);
+    }
 }
 
 /// Fast `acc := (acc - a) mod p`. Direct sub + conditional add-p + flag
@@ -1361,6 +1400,19 @@ fn mod_shift_left_by_k(
     let mut v_ext = v.to_vec();
     v_ext.push(ovf);
     let cuccaro_op = |b: &mut B, pos: usize, is_sub: bool| {
+        // AUDIT #1: at pos==0 on the plain-Cuccaro (lowq) path the operation is
+        // v_ext += spill where v_ext[0..k] is provably |0> (Step-1 left-shift
+        // zeroed the low k bits) and spill is nonzero only in bits [0..k).  No
+        // carry can propagate, so the n+1-wide Cuccaro degenerates to k CX
+        // copies.  CX is self-inverse, so the same body serves the reverse call.
+        // Guarded by lowq_shift22() because the _fast variants use measured
+        // uncompute (the CX-copy is invalid there).
+        if pos == 0 && lowq_shift22() && audit_shift22_pos0_cx() {
+            for i in 0..k {
+                b.cx(spill[i], v_ext[i]);
+            }
+            return;
+        }
         let pad_width = n + 1 - pos;
         let padded = b.alloc_qubits(pad_width);
         for i in 0..k.min(pad_width) {
@@ -1467,6 +1519,15 @@ fn mod_shift_right_by_k(
 
     // Reverse step 2: inverse of the consolidated op list (5 ops, in reverse order, flipped signs).
     let cuccaro_op = |b: &mut B, pos: usize, is_sub: bool| {
+        // AUDIT #1 (reverse): exact gate-inverse of the forward pos==0 CX-copy.
+        // At this point the forward pos!=0 folds + reduction are fully undone, so
+        // v_ext[0..k] again equals spill; k CX subtract it back to |0>.
+        if pos == 0 && lowq_shift22() && audit_shift22_pos0_cx() {
+            for i in 0..k {
+                b.cx(spill[i], v_ext[i]);
+            }
+            return;
+        }
         let pad_width = n + 1 - pos;
         let padded = b.alloc_qubits(pad_width);
         for i in 0..k.min(pad_width) {
@@ -1534,6 +1595,13 @@ fn mod_shift_left_by_k_lowq(
     let mut v_ext = v.to_vec();
     v_ext.push(ovf);
     let cuccaro_op = |b: &mut B, pos: usize, is_sub: bool| {
+        // AUDIT #1: pos==0 add is v_ext += spill into zeroed low k bits -> k CX.
+        if pos == 0 && audit_shift22_pos0_cx() {
+            for i in 0..k {
+                b.cx(spill[i], v_ext[i]);
+            }
+            return;
+        }
         let pad_width = n + 1 - pos;
         let padded = b.alloc_qubits(pad_width);
         for i in 0..k.min(pad_width) {
@@ -1598,6 +1666,13 @@ fn mod_shift_right_by_k_lowq(
     b.free(flag_inv);
 
     let cuccaro_op = |b: &mut B, pos: usize, is_sub: bool| {
+        // AUDIT #1 (reverse): exact gate-inverse of the forward pos==0 CX-copy.
+        if pos == 0 && audit_shift22_pos0_cx() {
+            for i in 0..k {
+                b.cx(spill[i], v_ext[i]);
+            }
+            return;
+        }
         let pad_width = n + 1 - pos;
         let padded = b.alloc_qubits(pad_width);
         for i in 0..k.min(pad_width) {
@@ -2039,7 +2114,7 @@ fn mod_mul_write_into_zero_acc_schoolbook_lowq(
     }
     mod_add_qq_fast(b, acc, &hi, p);
     let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
-    mod_add_qq(b, acc, &hi, p);
+    sol_fold_add_qq(b, acc, &hi, p);
     mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
     for _ in 0..10 {
         mod_halve_inplace_fast(b, &hi, p);
@@ -2086,7 +2161,7 @@ fn mod_mul_write_into_zero_acc_schoolbook(
     }
     mod_add_qq_fast(b, acc, &hi, p);
     let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
-    mod_add_qq(b, acc, &hi, p);
+    sol_fold_add_qq(b, acc, &hi, p);
     mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
     b.set_phase("sol_halve_tail");
     for _ in 0..10 {
@@ -2825,7 +2900,7 @@ fn mod_mul_add_into_acc_karatsuba_lowq_with_tmp_ext(
     }
     mod_add_qq_fast(b, acc, &hi, p);
     let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
-    mod_add_qq(b, acc, &hi, p);
+    sol_fold_add_qq(b, acc, &hi, p);
     mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
     for _ in 0..10 {
         mod_halve_inplace_fast(b, &hi, p);
@@ -2936,7 +3011,7 @@ fn mod_mul_add_into_acc_karatsuba_with_tmp_ext(
     }
     mod_add_qq_fast_lowscratch(b, acc, &hi, p);
     let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
-    mod_add_qq(b, acc, &hi, p);
+    sol_fold_add_qq(b, acc, &hi, p);
     mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
     for _ in 0..10 {
         mod_halve_inplace_fast(b, &hi, p);
@@ -2999,9 +3074,11 @@ fn mod_mul_write_into_zero_acc_karatsuba_with_tmp_ext(
     b.set_phase("kara_solinas_shift22L");
     let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
     b.set_phase("kara_solinas_post32_add");
-    // Use non-fast mod_add at peak site (after shift_left, with extra locals alive)
-    // to save 256 carry qubits at the expense of ~n Toffoli.
-    mod_add_qq(b, acc, &hi, p);
+    // PEAK-PROTECTED (pair1 sister): keep the slow non-fast mod_add at this peak
+    // site (after shift_left, with extra locals alive) to save 256 carry qubits.
+    // AUDIT GROUP A deliberately does NOT swap this one — fast here breaks 2708.
+    let acc_peak_protected = acc;
+    mod_add_qq(b, acc_peak_protected, &hi, p);
     b.set_phase("kara_solinas_shift22R");
     mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
     b.set_phase("kara_solinas_post_halve");
@@ -3228,7 +3305,7 @@ fn mod_mul_write_into_zero_acc_karatsuba2(
     }
     mod_add_qq_fast(b, acc, &hi, p);
     let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
-    mod_add_qq(b, acc, &hi, p);
+    sol_fold_add_qq(b, acc, &hi, p);
     mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
     for _ in 0..10 {
         mod_halve_inplace_fast(b, &hi, p);
@@ -3277,7 +3354,7 @@ fn mod_mul_add_into_acc_schoolbook(
     }
     mod_add_qq_fast(b, acc, &hi, p); // position 10
     let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
-    mod_add_qq(b, acc, &hi, p); // position 32
+    sol_fold_add_qq(b, acc, &hi, p); // position 32
     mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
     b.set_phase("sol_halve_tail");
     for _ in 0..10 {
@@ -3384,7 +3461,7 @@ fn squaring_add_to_acc_schoolbook(b: &mut B, acc: &[QubitId], x: &[QubitId], p: 
     }
     mod_add_qq_fast(b, acc, &hi, p);
     let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
-    mod_add_qq(b, acc, &hi, p);
+    sol_fold_add_qq(b, acc, &hi, p);
     mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
     for _ in 0..10 {
         mod_halve_inplace_fast(b, &hi, p);
@@ -3400,7 +3477,13 @@ fn mod_add_solinas_ext_product(b: &mut B, acc: &[QubitId], tmp_ext: &[QubitId], 
     debug_assert_eq!(tmp_ext.len(), 2 * n);
     let lo: Vec<QubitId> = tmp_ext[0..n].to_vec();
     let hi: Vec<QubitId> = tmp_ext[n..2 * n].to_vec();
-    mod_add_qq_fast(b, acc, &lo, p);
+    // AUDIT #6: sole caller passes a freshly alloc'd (|0>) `breg`, so the first
+    // operand add into the zero accumulator is a CX-copy (256 CCX -> 0).
+    if audit_sol_folds() {
+        mod_add_qq_fast_from_zero(b, acc, &lo, p);
+    } else {
+        mod_add_qq_fast(b, acc, &lo, p);
+    }
     mod_add_qq_fast(b, acc, &hi, p);
     for _ in 0..4 {
         mod_double_inplace_fast(b, &hi, p);
@@ -3415,7 +3498,7 @@ fn mod_add_solinas_ext_product(b: &mut B, acc: &[QubitId], tmp_ext: &[QubitId], 
     }
     mod_add_qq_fast(b, acc, &hi, p);
     let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
-    mod_add_qq_fast(b, acc, &hi, p);
+    sol_fold_add_qq(b, acc, &hi, p);
     mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
     for _ in 0..10 {
         mod_halve_inplace_fast(b, &hi, p);
@@ -3443,7 +3526,7 @@ fn mod_sub_solinas_ext_product(b: &mut B, acc: &[QubitId], tmp_ext: &[QubitId], 
     }
     mod_sub_qq_fast(b, acc, &hi, p);
     let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
-    mod_sub_qq(b, acc, &hi, p);
+    sol_fold_sub_qq(b, acc, &hi, p);
     mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
     for _ in 0..10 {
         mod_halve_inplace_fast(b, &hi, p);
@@ -3567,7 +3650,7 @@ fn squaring_sub_from_acc_schoolbook(b: &mut B, acc: &[QubitId], x: &[QubitId], p
     }
     mod_sub_qq_fast(b, acc, &hi, p);
     let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
-    mod_sub_qq(b, acc, &hi, p);
+    sol_fold_sub_qq(b, acc, &hi, p);
     mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
     for _ in 0..10 {
         mod_halve_inplace_fast(b, &hi, p);
@@ -3611,7 +3694,7 @@ fn squaring_sub_from_acc_schoolbook_lowq_shift22(
     }
     mod_sub_qq_fast(b, acc, &hi, p);
     let (spill, flag_inv, ovf) = mod_shift_left_by_k_lowq(b, &hi, p, 22);
-    mod_sub_qq(b, acc, &hi, p);
+    sol_fold_sub_qq(b, acc, &hi, p);
     mod_shift_right_by_k_lowq(b, &hi, p, 22, spill, flag_inv, ovf);
     for _ in 0..10 {
         mod_halve_inplace_fast(b, &hi, p);
