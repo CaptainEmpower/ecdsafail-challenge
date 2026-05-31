@@ -3415,7 +3415,7 @@ fn mod_add_solinas_ext_product(b: &mut B, acc: &[QubitId], tmp_ext: &[QubitId], 
     }
     mod_add_qq_fast(b, acc, &hi, p);
     let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
-    mod_add_qq(b, acc, &hi, p);
+    mod_add_qq_fast(b, acc, &hi, p);
     mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
     for _ in 0..10 {
         mod_halve_inplace_fast(b, &hi, p);
