@@ -174,7 +174,13 @@ fn kal_carrytail_mode() -> &'static str {
         Some("add") => "add",
         Some("sub") => "sub",
         Some("0") | Some("off") => "off",
-        _ => "sub", // default-ON for the SUB path (banked clean island)
+        // default-ON for BOTH paths. The ADD-path phase leak was a carry-tail
+        // truncation dropping a real carry on the DENSE constant c=p+1 used by
+        // mod_neg/mod_double, corrupting high sum bits → poisoning a sign-bit
+        // comparison → dirty flag whose free()/R injected random phase. Fixed by
+        // the constant-aware window (kal_carrytail_count_c): dense constants now
+        // run full-chain, sparse Solinas constants keep the tight truncation.
+        _ => "both",
     }
 }
 
@@ -238,7 +244,18 @@ pub(crate) fn kal_carrytail_w() -> usize {
     // → arithmetically exact). margin=0 + W=26 = 2,574,129 × 2309 = 5,943,663,861
     // (validated 9024-clean, peak 2309). W∈{24,25,27,30,32,40,45} reject the lottery
     // here; W=23 and (W=26,K0=25) are mm=1 near-misses. So cswap-on default := 26.
-    let default = if kal_cswap_wtrunc_enabled() { 26 } else { 36 };
+    // BOTH-PATH island: with the ADD path unlocked (constant-aware window, mode
+    // default "both"), a full 9024-shot W-sweep on this stream found W=44 clean
+    // (0/0/0): avg-exec 2,547,490 Toffoli × 2309 = 5,882,154,410, below the
+    // sub-only baseline 5,935,088,235. W∈{32,36,40,49,60,90,140} reject the
+    // Fiat-Shamir island lottery here. Sub-only fallbacks retained for overrides.
+    let default = if kal_carrytail_add_enabled() {
+        44
+    } else if kal_cswap_wtrunc_enabled() {
+        26
+    } else {
+        36
+    };
     env_usize("KAL_CARRYTAIL_W").unwrap_or(default)
 }
 
@@ -262,6 +279,30 @@ pub(crate) fn kal_carrytail_count(n: usize, enabled: bool) -> usize {
         return full;
     }
     let cut = kal_carrytail_k0().saturating_add(kal_carrytail_w());
+    cut.min(full)
+}
+
+/// Constant-aware carry-tail count for the direct const ±c adders. Truncating
+/// at `cut` is exact only if no carry can reach bit `cut`; every set bit of `c`
+/// (with a |1> control) is a carry generator/propagator, so the window must
+/// start ABOVE c's top set bit. Anchor `k0 = max(env_k0, c.bit_len())`:
+///   * SPARSE Solinas c = 2^256 - p (top bit 32) keeps the tight truncation, but
+///   * DENSE c = p+1 (mod_neg/mod_double, top bit 255) gets the full chain
+///     (cut = n-1), the only sound choice — otherwise a dropped carry corrupts
+///     the high sum bits, poisons a sign-bit comparison, and the dirty flag's
+///     free()/R injects random global phase (the ADD-path 141 phase-garbage).
+/// Single-use, so forward sweep, sum XOR and reverse uncompute agree.
+#[inline]
+pub(crate) fn kal_carrytail_count_c(n: usize, c: U256, enabled: bool) -> usize {
+    if n <= 1 {
+        return n.saturating_sub(1);
+    }
+    let full = n - 1;
+    if !enabled {
+        return full;
+    }
+    let k0 = kal_carrytail_k0().max(c.bit_len());
+    let cut = k0.saturating_add(kal_carrytail_w());
     cut.min(full)
 }
 

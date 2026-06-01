@@ -790,7 +790,13 @@ pub(crate) fn cadd_nbit_const_direct_fast(b: &mut B, acc: &[QubitId], c: U256, c
     // CARRY-TAIL truncation: compute the carry chain only through bit `cut-1`.
     // cut == n-1 (full chain) when truncation is disabled.  Phase-parity law:
     // forward sweep, sum XOR, and reverse uncompute all use this same `cut`.
-    let cut = kal_carrytail_count(n, kal_carrytail_add_enabled());
+    // Constant-aware window: dense constants (e.g. c=p+1 in mod_neg/mod_double,
+    // top set bit 255) must NOT be truncated — a dropped carry corrupts the high
+    // sum bits, poisons a downstream sign-bit comparison, leaves a flag dirty, and
+    // its free()/R injects random phase. Anchoring k0 above c's top set bit gives
+    // dense constants the full chain while sparse Solinas constants keep the tight
+    // truncation. This is what makes the ADD path phase-clean.
+    let cut = kal_carrytail_count_c(n, c, kal_carrytail_add_enabled());
     let carries = b.alloc_qubits(cut);
 
     // Forward carry sweep. carry_{i+1} = majority(acc_i, k_i, carry_i).
