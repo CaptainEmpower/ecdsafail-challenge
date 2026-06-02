@@ -2711,6 +2711,59 @@ fn cmp_lt_into_fast(b: &mut B, u: &[QubitId], v: &[QubitId], flag: QubitId) {
     b.free(c_in);
 }
 
+fn ccx_cmp_lt_into_fast(b: &mut B, u: &[QubitId], v: &[QubitId], ctrl: QubitId, target: QubitId) {
+    if kal_vent_modadd_enabled() {
+        let flag = b.alloc_qubit();
+        cmp_lt_into(b, u, v, flag);
+        b.ccx(ctrl, flag, target);
+        cmp_lt_into(b, u, v, flag);
+        b.free(flag);
+        return;
+    }
+
+    let n = u.len();
+    assert_eq!(n, v.len());
+    let c_in = b.alloc_qubit();
+    let carries = b.alloc_qubits(n);
+    for i in 0..n {
+        b.x(u[i]);
+    }
+
+    b.cx(u[0], v[0]);
+    b.cx(u[0], c_in);
+    b.ccx(c_in, v[0], carries[0]);
+    b.cx(carries[0], u[0]);
+    for i in 1..n {
+        b.cx(u[i], v[i]);
+        b.cx(u[i], u[i - 1]);
+        b.ccx(u[i - 1], v[i], carries[i]);
+        b.cx(carries[i], u[i]);
+    }
+
+    b.ccx(ctrl, u[n - 1], target);
+
+    for i in (1..n).rev() {
+        b.cx(carries[i], u[i]);
+        let m = b.alloc_bit();
+        b.hmr(carries[i], m);
+        b.cz_if(u[i - 1], v[i], m);
+        b.cx(u[i], u[i - 1]);
+        b.cx(u[i], v[i]);
+    }
+    b.cx(carries[0], u[0]);
+    let m0 = b.alloc_bit();
+    b.hmr(carries[0], m0);
+    b.cz_if(c_in, v[0], m0);
+    b.cx(u[0], c_in);
+    b.cx(u[0], v[0]);
+
+    for i in 0..n {
+        b.x(u[i]);
+    }
+    b.free_vec(&carries);
+    b.free(c_in);
+}
+
 /// Like `mod_add_qq` but uses `cmp_lt_into_fast` for the flag uncompute.
 /// NOT safe inside emit_inverse blocks.
 fn mod_add_qq_fast(b: &mut B, acc: &[QubitId], a: &[QubitId], p: U256) {
@@ -22469,6 +22522,13 @@ fn dialog_gcd_compare_bits_for_step(step: usize, active_width: usize) -> usize {
     global.max(1)
 }
 
+fn dialog_gcd_fused_branch_bits_enabled() -> bool {
+    std::env::var("DIALOG_GCD_FUSED_BRANCH_BITS")
+        .ok()
+        .as_deref()
+        == Some("1")
+}
+
 fn dialog_gcd_cmp_gt_truncated_into_width(
     b: &mut B,
     u: &[QubitId],
@@ -22481,6 +22541,21 @@ fn dialog_gcd_cmp_gt_truncated_into_width(
     let compare_bits = compare_bits.min(u.len()).max(1);
     let start = u.len() - compare_bits;
     cmp_lt_into_fast(b, &v[start..], &u[start..], flag);
+}
+
+fn dialog_gcd_ccx_cmp_gt_truncated_into_width(
+    b: &mut B,
+    u: &[QubitId],
+    v: &[QubitId],
+    ctrl: QubitId,
+    target: QubitId,
+    compare_bits: usize,
+) {
+    assert_eq!(u.len(), v.len());
+    assert!(!u.is_empty());
+    let compare_bits = compare_bits.min(u.len()).max(1);
+    let start = u.len() - compare_bits;
+    ccx_cmp_lt_into_fast(b, &v[start..], &u[start..], ctrl, target);
 }
 
 fn dialog_gcd_cmp_gt_truncated_into(b: &mut B, u: &[QubitId], v: &[QubitId], flag: QubitId) {
@@ -22884,9 +22959,20 @@ fn emit_dialog_gcd_raw_tobitvector_steps(
 
         b.set_phase("dialog_gcd_raw_tobitvector_branch_bits");
         b.cx(v[0], b0);
-        dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
-        b.ccx(b0, cmp, b0_and_b1);
-        dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+        if dialog_gcd_fused_branch_bits_enabled() {
+            dialog_gcd_ccx_cmp_gt_truncated_into_width(
+                b,
+                u_active,
+                v_active,
+                b0,
+                b0_and_b1,
+                compare_bits,
+            );
+        } else {
+            dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+            b.ccx(b0, cmp, b0_and_b1);
+            dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+        }
         b.free(cmp);
 
         b.set_phase("dialog_gcd_raw_tobitvector_cswap");
@@ -22935,9 +23021,20 @@ fn emit_dialog_gcd_raw_tobitvector_steps_reverse(
         }
 
         b.set_phase("dialog_gcd_raw_tobitvector_reverse_branch_bits");
-        dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
-        b.ccx(b0, cmp, b0_and_b1);
-        dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+        if dialog_gcd_fused_branch_bits_enabled() {
+            dialog_gcd_ccx_cmp_gt_truncated_into_width(
+                b,
+                u_active,
+                v_active,
+                b0,
+                b0_and_b1,
+                compare_bits,
+            );
+        } else {
+            dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+            b.ccx(b0, cmp, b0_and_b1);
+            dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+        }
         b.free(cmp);
         b.cx(v[0], b0);
     }
@@ -23066,8 +23163,7 @@ fn dialog_gcd_cmod_add_materialized_pseudomersenne(
     b.set_phase("dialog_gcd_materialized_special_overflow_clean");
     if dialog_gcd_raw_apply_truncated_clean_enabled() {
         let compare_start = N - dialog_gcd_apply_clean_compare_bits();
-        // Measured comparator (peak-safe: add carries already freed).
-        cmp_lt_into_fast(b, &acc[compare_start..], &f[compare_start..], acc_ovf);
+        cmp_lt_into(b, &acc[compare_start..], &f[compare_start..], acc_ovf);
     } else {
         cmp_lt_into(b, acc, &f, acc_ovf);
     }
@@ -23132,14 +23228,14 @@ fn dialog_gcd_cmod_sub_materialized_pseudomersenne(
         for &q in &a[compare_start..] {
             b.x(q);
         }
-        cmp_lt_into_fast(
+        cmp_lt_into(
             b,
             &acc[compare_start..],
             &a[compare_start..],
             underflow_pred,
         );
         b.ccx(ctrl, underflow_pred, acc_ovf);
-        cmp_lt_into_fast(
+        cmp_lt_into(
             b,
             &acc[compare_start..],
             &a[compare_start..],
@@ -23294,14 +23390,14 @@ fn dialog_gcd_cmod_sub_materialized_pseudomersenne_borrowed_subtrahend(
         for &q in &a[compare_start..] {
             b.x(q);
         }
-        cmp_lt_into_fast(
+        cmp_lt_into(
             b,
             &acc[compare_start..],
             &a[compare_start..],
             underflow_pred,
         );
         b.ccx(ctrl, underflow_pred, acc_ovf);
-        cmp_lt_into_fast(
+        cmp_lt_into(
             b,
             &acc[compare_start..],
             &a[compare_start..],
@@ -23651,9 +23747,20 @@ fn emit_dialog_gcd_compressed_sidecar_tobitvector_steps_block_lifecycle(
 
             b.set_phase("dialog_gcd_compressed_block_tobitvector_branch_bits");
             b.cx(v[0], b0);
-            dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
-            b.ccx(b0, cmp, b0_and_b1);
-            dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+            if dialog_gcd_fused_branch_bits_enabled() {
+                dialog_gcd_ccx_cmp_gt_truncated_into_width(
+                    b,
+                    u_active,
+                    v_active,
+                    b0,
+                    b0_and_b1,
+                    compare_bits,
+                );
+            } else {
+                dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+                b.ccx(b0, cmp, b0_and_b1);
+                dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+            }
             b.free(cmp);
 
             b.set_phase("dialog_gcd_compressed_block_tobitvector_cswap");
@@ -23731,9 +23838,20 @@ fn emit_dialog_gcd_compressed_sidecar_tobitvector_steps_reverse_block_lifecycle(
             }
 
             b.set_phase("dialog_gcd_compressed_block_tobitvector_reverse_branch_bits");
-            dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
-            b.ccx(b0, cmp, b0_and_b1);
-            dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+            if dialog_gcd_fused_branch_bits_enabled() {
+                dialog_gcd_ccx_cmp_gt_truncated_into_width(
+                    b,
+                    u_active,
+                    v_active,
+                    b0,
+                    b0_and_b1,
+                    compare_bits,
+                );
+            } else {
+                dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+                b.ccx(b0, cmp, b0_and_b1);
+                dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+            }
             b.free(cmp);
             b.cx(v[0], b0);
         }
@@ -23858,9 +23976,20 @@ fn emit_dialog_gcd_compressed_sidecar_tobitvector_steps(
 
         b.set_phase("dialog_gcd_compressed_sidecar_tobitvector_branch_bits");
         b.cx(v[0], b0);
-        dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
-        b.ccx(b0, cmp, b0_and_b1);
-        dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+        if dialog_gcd_fused_branch_bits_enabled() {
+            dialog_gcd_ccx_cmp_gt_truncated_into_width(
+                b,
+                u_active,
+                v_active,
+                b0,
+                b0_and_b1,
+                compare_bits,
+            );
+        } else {
+            dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+            b.ccx(b0, cmp, b0_and_b1);
+            dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+        }
         b.free(cmp);
 
         b.set_phase("dialog_gcd_compressed_sidecar_tobitvector_cswap");
@@ -23934,9 +24063,20 @@ fn emit_dialog_gcd_compressed_sidecar_tobitvector_steps_reverse(
         }
 
         b.set_phase("dialog_gcd_compressed_sidecar_tobitvector_reverse_branch_bits");
-        dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
-        b.ccx(b0, cmp, b0_and_b1);
-        dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+        if dialog_gcd_fused_branch_bits_enabled() {
+            dialog_gcd_ccx_cmp_gt_truncated_into_width(
+                b,
+                u_active,
+                v_active,
+                b0,
+                b0_and_b1,
+                compare_bits,
+            );
+        } else {
+            dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+            b.ccx(b0, cmp, b0_and_b1);
+            dialog_gcd_cmp_gt_truncated_into_width(b, u_active, v_active, cmp, compare_bits);
+        }
         b.free(cmp);
         b.cx(v[0], b0);
     }
@@ -27860,7 +28000,7 @@ fn configure_ecdsafail_submission_route() {
     set_default_env("DIALOG_GCD_COMPRESSED_SIDECAR_LOG", "1");
     set_default_env("DIALOG_GCD_COMPRESSED_BLOCK_LIFECYCLE", "1");
     set_default_env("DIALOG_GCD_PA9024_COMPARE_SCHEDULE", "0");
-    set_default_env("DIALOG_GCD_COMPARE_BITS", "62");
+    set_default_env("DIALOG_GCD_COMPARE_BITS", "63");
     set_default_env("DIALOG_GCD_APPLY_CLEAN_COMPARE_BITS", "20");
     set_default_env("DIALOG_GCD_RAW_PA", "1");
     set_default_env("DIALOG_GCD_ACTIVE_ITERATIONS", "399");
@@ -27883,13 +28023,17 @@ fn configure_ecdsafail_submission_route() {
     // difference, mirroring the already-measured apply ADD. ~n Toffoli instead
     // of ~2n per call; peak-neutral (same carry lane the ADD already uses).
     set_default_env("DIALOG_GCD_MEASURED_APPLY_SUB", "1");
-    // COMPARE_BITS tightening: narrow the GCD comparator window 75 -> 62 and
-    // co-tune the Fiat-Shamir reroll to land a clean 9024-shot island.
-    // Pure Toffoli reduction (1981734 -> 1925930), peak-neutral at 1698.
+    // COMPARE_BITS tightening: narrow the GCD comparator window 75 -> 63 and
+    // co-tune the Fiat-Shamir reroll (1 -> 5) to land a clean 9024-shot island.
+    // Pure Toffoli reduction (1981734 -> 1952382), peak-neutral at 1698.
     // (Validated 0/0/0 over 9024 via eval_circuit.)
-    // Apply-phase clean compares also use the measured comparator
-    // (cmp_lt_into_fast); op stream changes, reroll=0 lands a clean island.
-    set_default_env("DIALOG_REROLL", "0");
+    set_default_env("DIALOG_REROLL", "5");
+    // Fuse the branch-bit comparator with the b0-controlled log update: derive
+    // b0_and_b1 from the in-flight comparator carry instead of materializing a
+    // separate cmp qubit and recomputing the comparator for uncompute. Pure
+    // Toffoli reduction (1952382 -> 1861990), peak-neutral at 1698.
+    // (Validated 0/0/0 over 9024 via eval_circuit.)
+    set_default_env("DIALOG_GCD_FUSED_BRANCH_BITS", "1");
 }
 
 fn build_builder() -> B {
