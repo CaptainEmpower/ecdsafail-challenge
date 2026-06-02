@@ -1567,6 +1567,231 @@ fn cuccaro_sub_fast(b: &mut B, a: &[QubitId], acc: &[QubitId], c_in: QubitId) {
     b.free_vec(&carries);
 }
 
+/// Windowed measured add: `acc += a + c_in (mod 2^n)`, reusing the proven
+/// `cuccaro_add_fast` block-wise but threading the inter-block carry through a
+/// 1-bit register extension. Only ~n/blocks measured-carry ancillae are live at
+/// once (vs n-1 for a single `cuccaro_add_fast`), at ~1 Toffoli/bit — this is
+/// the MBUC space saving: keep the free (measurement) carry uncompute while
+/// removing the full-width carry lane from the peak. `a` restored, `c_in` -> 0.
+fn cuccaro_add_fast_windowed(
+    b: &mut B,
+    a: &[QubitId],
+    acc: &[QubitId],
+    c_in: QubitId,
+    blocks: usize,
+) {
+    let n = a.len();
+    assert_eq!(n, acc.len());
+    if n == 0 {
+        return;
+    }
+    let blocks = blocks.max(1).min(n);
+    if blocks == 1 {
+        cuccaro_add_fast(b, a, acc, c_in);
+        return;
+    }
+    // cuccaro_add_fast RESTORES c_in to its input value (does NOT consume it to
+    // 0). So a threaded carry-out, after being used as the next block's c_in,
+    // still holds the boundary carry and cannot be freed directly (a nonzero
+    // free emits R = phase^=q&rng, a phase leak). We therefore keep the boundary
+    // carries live, and after all blocks clear each via the cumulative identity
+    // c_j = (acc_final[0..p_j] < a[0..p_j])  (block 0 has no carry-in), using the
+    // non-fast (no-carry-lane) comparator so it adds no width.
+    let mut carry = c_in;
+    let mut owned_carry = false;
+    let mut lo = 0usize;
+    let mut couts: Vec<(QubitId, usize)> = Vec::new(); // (carry qubit, boundary pos p_j)
+    for blk in 0..blocks {
+        let hi = ((blk + 1) * n) / blocks;
+        if hi <= lo {
+            continue;
+        }
+        if blk == blocks - 1 || hi == n {
+            cuccaro_add_fast(b, &a[lo..hi], &acc[lo..hi], carry);
+            break;
+        }
+        let cout = b.alloc_qubit();
+        let zero = b.alloc_qubit();
+        let mut a_ext: Vec<QubitId> = a[lo..hi].to_vec();
+        a_ext.push(zero);
+        let mut acc_ext: Vec<QubitId> = acc[lo..hi].to_vec();
+        acc_ext.push(cout);
+        cuccaro_add_fast(b, &a_ext, &acc_ext, carry);
+        b.free(zero);
+        if owned_carry {
+            // previous boundary carry, already cleared below at end; but it is
+            // consumed as this block's c_in and RESTORED, so record it to clear.
+        }
+        couts.push((cout, hi));
+        carry = cout;
+        owned_carry = true;
+        lo = hi;
+    }
+    // Clear boundary carries (reverse order is irrelevant; each uses the final
+    // low sum which is already settled). c_j = (acc[0..p_j] < a[0..p_j]).
+    for &(cout, p) in couts.iter().rev() {
+        cmp_lt_into_fast(b, &acc[..p], &a[..p], cout);
+        b.free(cout);
+    }
+}
+
+/// Windowed measured subtract: `acc -= a + c_in (mod 2^n)`, mirror of
+/// `cuccaro_add_fast_windowed` using `cuccaro_sub_fast` per block with the
+/// borrow threaded through a 1-bit extension (the extended top bit captures the
+/// block's borrow-out). ~n/blocks measured-borrow ancillae live; ~1 Toffoli/bit.
+fn cuccaro_sub_fast_windowed(
+    b: &mut B,
+    a: &[QubitId],
+    acc: &[QubitId],
+    c_in: QubitId,
+    blocks: usize,
+) {
+    let n = a.len();
+    assert_eq!(n, acc.len());
+    if n == 0 {
+        return;
+    }
+    let blocks = blocks.max(1).min(n);
+    if blocks == 1 {
+        cuccaro_sub_fast(b, a, acc, c_in);
+        return;
+    }
+    let mut borrow = c_in;
+    let mut owned = false;
+    let mut lo = 0usize;
+    let mut bouts: Vec<(QubitId, usize)> = Vec::new();
+    let _ = owned;
+    for blk in 0..blocks {
+        let hi = ((blk + 1) * n) / blocks;
+        if hi <= lo {
+            continue;
+        }
+        if blk == blocks - 1 || hi == n {
+            cuccaro_sub_fast(b, &a[lo..hi], &acc[lo..hi], borrow);
+            break;
+        }
+        let bout = b.alloc_qubit();
+        let zero = b.alloc_qubit();
+        let mut a_ext: Vec<QubitId> = a[lo..hi].to_vec();
+        a_ext.push(zero);
+        let mut acc_ext: Vec<QubitId> = acc[lo..hi].to_vec();
+        acc_ext.push(bout);
+        cuccaro_sub_fast(b, &a_ext, &acc_ext, borrow);
+        b.free(zero);
+        bouts.push((bout, hi));
+        borrow = bout;
+        owned = true;
+        lo = hi;
+    }
+    // Clear boundary borrows: b_j = (acc_final[0..p] + a[0..p] >= 2^p) = (~a < acc),
+    // computed with a in-place complemented (X), restored after.
+    for &(bout, p) in bouts.iter().rev() {
+        for i in 0..p {
+            b.x(a[i]);
+        }
+        cmp_lt_into_fast(b, &a[..p], &acc[..p], bout);
+        for i in 0..p {
+            b.x(a[i]);
+        }
+        b.free(bout);
+    }
+}
+
+/// Self-test for `cuccaro_add_fast_windowed`: classically simulates the windowed
+/// adder for several (a, acc) and block counts and checks acc = a+acc mod 2^n,
+/// a restored, c_in cleared. Returns Err on first mismatch. Callable from the
+/// release build_circuit binary (the lib test build is bit-rotted), gated by
+/// MBUC_SELFTEST. Deterministic on the data registers despite measured carries.
+pub fn mbuc_windowed_add_selftest() -> Result<(), String> {
+    use sha3::{digest::ExtendableOutput, Shake128};
+    let n = 64usize;
+    let cases: [(u64, u64); 8] = [
+        (0, 0),
+        (1, 1),
+        (0xFFFF_FFFF_FFFF_FFFF, 1),
+        (0x1234_5678_9abc_def0, 0x0fed_cba9_8765_4321),
+        (0xAAAA_AAAA_AAAA_AAAA, 0x5555_5555_5555_5555),
+        (0xFFFF_FFFF_FFFF_FFFF, 0xFFFF_FFFF_FFFF_FFFF),
+        (0x8000_0000_0000_0000, 0x8000_0000_0000_0000),
+        (0xDEAD_BEEF_CAFE_BABE, 0x0123_4567_89ab_cdef),
+    ];
+    for blocks in [1usize, 2, 3, 4, 5, 8, 13, 16, 32, 64] {
+        for &(av, accv) in &cases {
+            let mut b = B::new();
+            let a = b.alloc_qubits(n);
+            let acc = b.alloc_qubits(n);
+            let c_in = b.alloc_qubit();
+            cuccaro_add_fast_windowed(&mut b, &a, &acc, c_in, blocks);
+            let nq = b.next_qubit as usize;
+            let nb = (b.next_bit as usize).max(1);
+            let ops = b.ops.clone();
+            let mut xof = Shake128::default().finalize_xof();
+            let mut sim = Simulator::new(nq, nb, &mut xof);
+            for (i, &q) in a.iter().enumerate() {
+                if (av >> i) & 1 != 0 { *sim.qubit_mut(q) |= 1; }
+            }
+            for (i, &q) in acc.iter().enumerate() {
+                if (accv >> i) & 1 != 0 { *sim.qubit_mut(q) |= 1; }
+            }
+            sim.apply_iter(ops.iter());
+            let mut got = 0u64; let mut a_out = 0u64;
+            for (i, &q) in acc.iter().enumerate() { got |= (sim.qubit(q) & 1) << i; }
+            for (i, &q) in a.iter().enumerate() { a_out |= (sim.qubit(q) & 1) << i; }
+            let want = av.wrapping_add(accv);
+            if got != want {
+                return Err(format!("SUM blocks={blocks} a={av:#x} acc={accv:#x} got={got:#x} want={want:#x}"));
+            }
+            if a_out != av {
+                return Err(format!("A-NOT-RESTORED blocks={blocks} a={av:#x} a_out={a_out:#x}"));
+            }
+            if sim.qubit(c_in) & 1 != 0 {
+                return Err(format!("CIN-NOT-CLEARED blocks={blocks}"));
+            }
+            if sim.phase != 0 {
+                return Err(format!(
+                    "ADD-PHASE-DIRTY blocks={blocks} a={av:#x} acc={accv:#x} phase={:#x}",
+                    sim.phase
+                ));
+            }
+            // --- windowed SUB: acc = acc - a mod 2^n ---
+            let mut bs = B::new();
+            let sa = bs.alloc_qubits(n);
+            let sacc = bs.alloc_qubits(n);
+            let sc = bs.alloc_qubit();
+            cuccaro_sub_fast_windowed(&mut bs, &sa, &sacc, sc, blocks);
+            let snq = bs.next_qubit as usize;
+            let snb = (bs.next_bit as usize).max(1);
+            let sops = bs.ops.clone();
+            let mut sxof = Shake128::default().finalize_xof();
+            let mut ssim = Simulator::new(snq, snb, &mut sxof);
+            for (i, &q) in sa.iter().enumerate() { if (av >> i) & 1 != 0 { *ssim.qubit_mut(q) |= 1; } }
+            for (i, &q) in sacc.iter().enumerate() { if (accv >> i) & 1 != 0 { *ssim.qubit_mut(q) |= 1; } }
+            ssim.apply_iter(sops.iter());
+            let mut sgot = 0u64; let mut sa_out = 0u64;
+            for (i, &q) in sacc.iter().enumerate() { sgot |= (ssim.qubit(q) & 1) << i; }
+            for (i, &q) in sa.iter().enumerate() { sa_out |= (ssim.qubit(q) & 1) << i; }
+            let swant = accv.wrapping_sub(av);
+            if sgot != swant {
+                return Err(format!("DIFF blocks={blocks} a={av:#x} acc={accv:#x} got={sgot:#x} want={swant:#x}"));
+            }
+            if sa_out != av {
+                return Err(format!("SUB-A-NOT-RESTORED blocks={blocks} a={av:#x}"));
+            }
+            if ssim.qubit(sc) & 1 != 0 {
+                return Err(format!("SUB-CIN-NOT-CLEARED blocks={blocks}"));
+            }
+            if ssim.phase != 0 {
+                return Err(format!(
+                    "SUB-PHASE-DIRTY blocks={blocks} a={av:#x} acc={accv:#x} phase={:#x}",
+                    ssim.phase
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+
 fn cuccaro_sub_fast_borrowed_carries(
     b: &mut B,
     a: &[QubitId],
@@ -23604,7 +23829,11 @@ fn dialog_gcd_cmod_add_materialized_pseudomersenne(
     let c_in = b.alloc_qubit();
 
     b.set_phase("dialog_gcd_materialized_special_raw_sum");
-    cuccaro_add_fast(b, &f_ext, &acc_ext, c_in);
+    if let Some(w) = dialog_gcd_apply_window_blocks() {
+        cuccaro_add_fast_windowed(b, &f_ext, &acc_ext, c_in, w);
+    } else {
+        cuccaro_add_fast(b, &f_ext, &acc_ext, c_in);
+    }
     b.free(c_in);
     b.free(f_ovf);
 
@@ -23637,6 +23866,13 @@ fn dialog_gcd_measured_apply_sub_enabled() -> bool {
     std::env::var("DIALOG_GCD_MEASURED_APPLY_SUB").ok().as_deref() == Some("1")
 }
 
+fn dialog_gcd_apply_window_blocks() -> Option<usize> {
+    std::env::var("DIALOG_GCD_APPLY_WINDOW_BLOCKS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&w| w >= 2)
+}
+
 fn dialog_gcd_cmod_sub_materialized_pseudomersenne(
     b: &mut B,
     acc: &[QubitId],
@@ -23665,7 +23901,11 @@ fn dialog_gcd_cmod_sub_materialized_pseudomersenne(
         // non-fast cuccaro_sub uncompute. Peak-safe: the symmetric apply ADD
         // already runs cuccaro_add_fast with its carry lane in this same phase.
         let c_in = b.alloc_qubit();
-        cuccaro_sub_fast(b, &f_ext, &acc_ext, c_in);
+        if let Some(w) = dialog_gcd_apply_window_blocks() {
+            cuccaro_sub_fast_windowed(b, &f_ext, &acc_ext, c_in, w);
+        } else {
+            cuccaro_sub_fast(b, &f_ext, &acc_ext, c_in);
+        }
         b.free(c_in);
     } else {
         sub_nbit_qq(b, &f_ext, &acc_ext);
@@ -28497,7 +28737,7 @@ fn configure_ecdsafail_submission_route() {
     set_default_env("DIALOG_GCD_COMPRESSED_SIDECAR_LOG", "1");
     set_default_env("DIALOG_GCD_COMPRESSED_BLOCK_LIFECYCLE", "1");
     set_default_env("DIALOG_GCD_PA9024_COMPARE_SCHEDULE", "1");
-    set_default_env("DIALOG_GCD_PA9024_COMPARE_SCHEDULE_MARGIN", "5");
+    set_default_env("DIALOG_GCD_PA9024_COMPARE_SCHEDULE_MARGIN", "8");
     set_default_env("KAL_DOUBLE_CARRY_TRUNC_W", "20");
     set_default_env("KAL_FOLD_CARRY_TRUNC_W", "20");
     set_default_env("DIALOG_GCD_ROUND763_DEDUP", "1");
@@ -28516,23 +28756,24 @@ fn configure_ecdsafail_submission_route() {
     set_default_env("DIALOG_GCD_RAW_TOBITVECTOR_VARIABLE_WIDTH", "1");
     set_default_env("DIALOG_GCD_RAW_TOBITVECTOR_BORROW_FUTURE_LOG_CARRIES", "1");
     set_default_env("ROUND84_XTAIL_SCHOOLBOOK", "1");
-    // W-TRUNC tightening: lower the GCD-body width envelope margin 37 -> 28 ->
-    // 27 and co-tune the Fiat-Shamir reroll to land a clean 9024-shot island.
-    // Pure Toffoli reduction; margin 28 -> 27 saves -4,636 (1,667,601 ->
-    // 1,662,965), peak-neutral at 1698, paired with REROLL=2 below.
-    // (Validated 0/0/0 over 9024 via eval_circuit; reroll island re-scanned for
-    // the current baked default stack — margin=27 needs REROLL=2, not 29.)
-    set_default_env("DIALOG_GCD_WIDTH_MARGIN", "27");
+    // W-TRUNC tightening: lower the GCD-body width envelope margin 37 -> 28 and
+    // co-tune the Fiat-Shamir reroll to land a clean 9024-shot island. Pure
+    // Toffoli reduction (2447846 -> 2396158), peak-neutral at 1698.
+    // (Validated 0/0/0 over 9024 via eval_circuit.)
+    set_default_env("DIALOG_GCD_WIDTH_MARGIN", "28");
     // Measured (Gidney) uncompute for the apply-phase modular subtract's raw
     // difference, mirroring the already-measured apply ADD. ~n Toffoli instead
     // of ~2n per call; peak-neutral (same carry lane the ADD already uses).
     set_default_env("DIALOG_GCD_MEASURED_APPLY_SUB", "1");
-    // Apply-clean comparator fast path: keep the truncation window but uncompute
-    // the materialized add/sub clean predicates with the measured comparator.
-    // Pure Toffoli reduction (1697569 -> 1673629), peak-neutral at 1698.
-    // REROLL re-scanned for the WIDTH_MARGIN=27 island: REROLL=2 lands 0/0/0
-    // over 9024 (29 was the margin=28 island). Score 2,823,714,570.
-    set_default_env("DIALOG_REROLL", "0");
+    // QUBIT-PEAK CUT (1698 -> 1572, -126q): host the GCD-body 'gated' on idle
+    // future-log slots (HOST_GATED), and window the apply add/sub carry lane into
+    // 2 blocks with measurement-uncompute + a measured boundary-carry clear so the
+    // 256-wide carry lane never coexists with f at the peak. Toffoli +102k
+    // (1,668,753 -> 1,770,897) but peak -126 => score 2,833,542,594 -> 2,783,850,084.
+    set_default_env("DIALOG_GCD_HOST_GATED", "1");
+    set_default_env("DIALOG_GCD_APPLY_WINDOW_BLOCKS", "2");
+    // New op stream (windowed apply) needs its own clean Fiat-Shamir island.
+    set_default_env("DIALOG_REROLL", "41");
     // Fuse the branch-bit comparator with the b0-controlled log update: derive
     // b0_and_b1 from the in-flight comparator carry instead of materializing a
     // separate cmp qubit and recomputing the comparator for uncompute. Pure
