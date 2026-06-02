@@ -32,11 +32,13 @@ use super::*;
 /// (since max(r,s) doubles per iter starting from max=1, so max ≤ 2^iter_idx).
 /// In that range, mod_double(r)'s Solinas cadd is identity — replace with
 /// a plain shift (0 Toffoli) for ~255 CCX savings per iter.
-// C* island retune: R_SMALL=326 saves five correction-free r-doubling iterations
-// vs R=321 (one more than the prior R=325). Clean at KAL_REROLL=254 (0/0/0 over
-// 9024 shots, validated by full benchmark.sh). R=327 had no clean reroll in 0-255
-// screen (every rr hit at least 1 classical mismatch + phase garbage).
-pub(crate) const R_SMALL_THRESHOLD: usize = 326;
+// bxue-l2 island (peak 2310 after reverting the f1-drop): R_SMALL=326,
+// BULK_PREFIX_SAFE_ITERS=400, pair1=399, pair2=397.
+// T-squeeze: R_SMALL=325 — the re-roll value that lands K0=25 clean on the
+// cswap-base a25248f margin=0 island (with K0=26/R=326 only W=26 is clean at
+// 2,574,129; dropping to K0=25 needs the R=325 re-roll → 2,570,415). R=324/326/327
+// reject at this depth. Stacks: margin=0 + K0=25 + R=325 + W=26 = 5,935,088,235.
+pub(crate) const R_SMALL_THRESHOLD: usize = 321;
 
 pub(crate) fn r_small_threshold() -> usize {
     std::env::var("KAL_R_SMALL_THRESHOLD")
@@ -455,10 +457,18 @@ pub(crate) fn kal_carrytail_w() -> usize {
     // rr=86 (identical avg-exec 2,408,761 T, flat peak 2309 = 5,561,829,149,
     // validated 0/0/0 over 9024 by official benchmark.sh). The baked KAL_REROLL
     // default (=35, see mod.rs) is CO-TUNED to this W; changing either re-rolls
-    // the input set and must be re-searched. W=18 has no clean island in 64
-    // rerolls (too aggressive). −1,277 avg-exec Toffoli vs the W=20 baseline.
+    // the input set and must be re-searched.
+    // OPTIMIZER ctW=18: carry-tail dropped 19->18 (sub-borrow cut 33+18=51,
+    // exactly at the 19-bit MC sub-borrow max bit 51 — still sound since the
+    // MC sub-borrow tops out at bit 51 meaning bit 51 is the last possibly-set
+    // carry bit; the add-path truncation is the lottery source). The prior C*
+    // dialog-fold stream (slack=4, rr=43) re-rolls the Fiat-Shamir input set
+    // with W=18; a 256-reroll screen found a clean island at rr=77 (avg-exec
+    // 2,559,226 T × 2025 peak = 5,182,432,650, screened 0/0/0). The baked
+    // KAL_REROLL default (=77, see mod.rs) is CO-TUNED to this W=18 stream;
+    // re-search if any scored op changes. −1,277 avg-exec Toffoli vs W=19.
     let default = if kal_carrytail_add_enabled() {
-        19
+        18
     } else if kal_cswap_wtrunc_enabled() {
         26
     } else {
