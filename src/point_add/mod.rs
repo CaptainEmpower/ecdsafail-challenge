@@ -6082,7 +6082,12 @@ fn squaring_sub_from_acc_karatsuba(b: &mut B, acc: &[QubitId], x: &[QubitId], p:
     let x_hi: Vec<QubitId> = x[h..n].to_vec();
 
     // z1_reg holds z1 = (lo+hi)^2, width 2*(h+1).
-    let z1_reg = b.alloc_qubits(2 * (h + 1));
+    let mut z1_reg = b.alloc_qubits(2 * (h + 1));
+    // KARA_FREE_Z1_TOPBIT: after z1 -= z0; z1 -= z2, z1_reg holds 2*lo*hi < 2^257,
+    // so its top bit (index 2(h+1)-1 = 257) is provably 0 throughout the Solinas
+    // peak. Free it for that window; re-grab a fresh zero before z1 += z2 restores
+    // (lo+hi)^2 for the inverse uncompute. Bennett-clean (free zero, alloc zero).
+    let free_z1_top = std::env::var("KARA_FREE_Z1_TOPBIT").ok().as_deref() == Some("1");
 
     // ── Forward z1 = (lo+hi)^2 FIRST (tmp_ext not yet allocated → low peak). ──
     {
@@ -6123,8 +6128,13 @@ fn squaring_sub_from_acc_karatsuba(b: &mut B, acc: &[QubitId], x: &[QubitId], p:
         sub_nbit_qq(b, &z2_ext, &z1_reg);
         b.free_vec(&pad);
     }
+    // z1_reg == 2*lo*hi < 2^257 here ⇒ bit 257 is 0. Release it for the peak window.
+    if free_z1_top {
+        let top = z1_reg.pop().expect("z1_reg width 2*(h+1) >= 2");
+        b.free(top);
+    }
     {
-        let pad = b.alloc_qubits(3 * h - 2 * (h + 1));
+        let pad = b.alloc_qubits(3 * h - z1_reg.len());
         let mut z1_ext: Vec<QubitId> = z1_reg.to_vec();
         z1_ext.extend_from_slice(&pad);
         let acc_slice: Vec<QubitId> = tmp_ext[h..4 * h].to_vec();
@@ -6240,12 +6250,17 @@ fn squaring_sub_from_acc_karatsuba(b: &mut B, acc: &[QubitId], x: &[QubitId], p:
     // ── Inverse combine: mid -= z1; z1 += z2; z1 += z0. ──
     b.set_phase("r84k_inv_combine");
     {
-        let pad = b.alloc_qubits(3 * h - 2 * (h + 1));
+        let pad = b.alloc_qubits(3 * h - z1_reg.len());
         let mut z1_ext: Vec<QubitId> = z1_reg.to_vec();
         z1_ext.extend_from_slice(&pad);
         let acc_slice: Vec<QubitId> = tmp_ext[h..4 * h].to_vec();
         sub_nbit_qq(b, &z1_ext, &acc_slice);
         b.free_vec(&pad);
+    }
+    // Restore z1_reg top bit (fresh zero) before z1 += z2 can re-set it.
+    if free_z1_top {
+        let top = b.alloc_qubit();
+        z1_reg.push(top);
     }
     {
         let pad = b.alloc_qubits(2);
@@ -29323,6 +29338,15 @@ fn configure_ecdsafail_submission_route() {
     // the reroll knobs below are re-tuned to 40/13 (found by a randomized 2-D
     // island search). Validated 0/0/0 over all 9024 shots @ 1543q / 1,682,159 T.
     set_default_env("KARA_SOL_DBL_FAST", "1");
+    // Stacked qubit cut (peak 1543 -> 1542, learned from anupsv's 8780d1e): the
+    // ROUND84 Karatsuba z1_reg top bit (index 257) is provably 0 across the whole
+    // Solinas-reduction peak window (z1_reg == 2*lo*hi < 2^257 there), so that
+    // qubit is freed for the window and re-grabbed (fresh zero) before the inverse
+    // combine restores z1=(lo+hi)^2. Bennett-clean, 0 added Toffoli. Stacks on
+    // KARA_SOL_DBL_FAST; the combined op stream re-rolls the island, re-tuned to
+    // REROLL=17/POST_SUB=56 below (MARGIN stays 5 — no give-back). Validated 0/0/0
+    // over 9024: 1542q x 1,682,159 T = 2,593,889,178.
+    set_default_env("KARA_FREE_Z1_TOPBIT", "1");
     // W-TRUNC tightening: GCD-body width envelope margin. Re-scanned for the
     // Karatsuba x-tail op stream: margin=27 + REROLL=0 lands a clean 9024-shot
     // island (anupsv's margin=26/REROLL=20 was for the schoolbook stream).
@@ -29361,8 +29385,8 @@ fn configure_ecdsafail_submission_route() {
     // The ROUND84 doublings + F_CUT=78 op-stream re-rolls the Fiat-Shamir island.
     // 2-D (DIALOG_REROLL x DIALOG_POST_SUB_REROLL) search lands 28/5 clean 0/0/0
     // over 9024 at 1543q and 1,695,087 avg executed Toffoli (score 2,615,519,241).
-    set_default_env("DIALOG_REROLL", "40");
-    set_default_env("DIALOG_POST_SUB_REROLL", "13");
+    set_default_env("DIALOG_REROLL", "17");
+    set_default_env("DIALOG_POST_SUB_REROLL", "56");
     // Fuse the branch-bit comparator with the b0-controlled log update: derive
     // b0_and_b1 from the in-flight comparator carry instead of materializing a
     // separate cmp qubit and recomputing the comparator for uncompute. Pure
