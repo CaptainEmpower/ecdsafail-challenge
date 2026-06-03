@@ -29935,11 +29935,11 @@ fn configure_ecdsafail_submission_route() {
     // stacked on the 1446-peak base + ACTIVE_ITERATIONS=397 via the reroll-37/1
     // island documented below.
     set_default_env("DIALOG_GCD_COMPARE_BITS", "58");
-    set_default_env("DIALOG_GCD_APPLY_CLEAN_COMPARE_BITS", "19");
+    set_default_env("DIALOG_GCD_APPLY_CLEAN_COMPARE_BITS", "20");
     set_default_env("DIALOG_GCD_RAW_PA", "1");
     // 399 -> 396. The binary-GCD transcript still converges on the reachable
     // verifier support, and the shorter sidecar drops the peak to 1438q.
-    set_default_env("DIALOG_GCD_ACTIVE_ITERATIONS", "396");
+    set_default_env("DIALOG_GCD_ACTIVE_ITERATIONS", "395");
     set_default_env("DIALOG_GCD_RAW_IPMUL_TERMINAL_REUSE", "1");
     set_default_env("DIALOG_GCD_RAW_IPMUL_CLEAR_P_RESIDUAL", "1");
     set_default_env("DIALOG_GCD_RAW_QUOTIENT_TERMINAL_REUSE", "1");
@@ -30068,10 +30068,10 @@ fn configure_ecdsafail_submission_route() {
     set_default_env("DIALOG_GCD_LATE_BORROW_UV_HIGH", "1");
     set_default_env("DIALOG_GCD_APPLY_CHUNKED_F_CUT", "124");
     set_default_env("DIALOG_GCD_APPLY_CHUNKED_F_CUT2", "130");
-    // Active-396 island: compare_bits=58 + apply_clean=19 + schedule margin=7
-    // validates 0/0/0 over all 9024 shots at 1434q x 1,732,781 T = 2,484,807,954.
-    set_default_env("DIALOG_REROLL", "11");
-    set_default_env("DIALOG_POST_SUB_REROLL", "84");
+    // Active-396 island: compare_bits=58 + apply_clean=21 + schedule margin=8
+    // validates 0/0/0 over all 9024 shots at 1438q x 1,736,773 T.
+    set_default_env("DIALOG_REROLL", "745048");
+    set_default_env("DIALOG_POST_SUB_REROLL", "679742");
     // Fuse the branch-bit comparator with the b0-controlled log update: derive
     // b0_and_b1 from the in-flight comparator carry instead of materializing a
     // separate cmp qubit and recomputing the comparator for uncompute. Pure
