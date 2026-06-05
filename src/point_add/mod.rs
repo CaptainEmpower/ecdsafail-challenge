@@ -32287,7 +32287,13 @@ fn configure_ecdsafail_submission_route() {
     // K2 pair-compressed route spends one branch-comparator bit back from the
     // newest frontier cut. This keeps the lower 1313q tier while landing a much
     // denser clean island than the 45-bit edge.
-    set_default_env("DIALOG_GCD_COMPARE_BITS", "46");
+    // Re-tighten 46 -> 45 on anshu4321's 1313q apply-teardown base (which had
+    // relaxed the GCD branch comparator to 46 to land its structural island).
+    // The comparator still decides every branch correctly on the reachable
+    // support at 45; clean Fiat-Shamir island at the re-rolled tail nonce below
+    // (5005587), found via island_search_prefilter and quantum-confirmed.
+    // avg executed Toffoli 1,536,923 -> 1,536,047 (-876), peak-neutral at 1313q.
+    set_default_env("DIALOG_GCD_COMPARE_BITS", "45");
     // Spend one apply-clean comparator bit back as well. The extra guard costs
     // 681 executed Toffoli on this route and still beats the current frontier.
     set_default_env("DIALOG_GCD_APPLY_CLEAN_COMPARE_BITS", "20");
@@ -32519,7 +32525,10 @@ fn configure_ecdsafail_submission_route() {
     // validated 0/0/0 over all 9024 shots at
     // 1313q x 1,536,923 T = 2,017,979,899.
     set_default_env("DIALOG_GCD_SELECTED_BODY_NOCIN", "1");
-    set_default_env("DIALOG_TAIL_NONCE", "689");
+    // Re-rolled for the COMPARE_BITS 46 -> 45 re-tightening on the 1313q base:
+    // nonce 5005587 lands a clean island, validated 0/0/0 over all 9024 shots at
+    // 1313q x 1,536,047 T = 2,016,829,711.
+    set_default_env("DIALOG_TAIL_NONCE", "5005587");
     set_default_env("DIALOG_GCD_APPLY_FINAL_WINDOWED_FAST_BLOCKS", "2");
     // Fuse the branch-bit comparator with the b0-controlled log update: derive
     // b0_and_b1 from the in-flight comparator carry instead of materializing a
