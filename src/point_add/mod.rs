@@ -31759,9 +31759,13 @@ fn configure_ecdsafail_submission_route() {
     // 399 T/qubit, far inside break-even. Score 1446 x 1,740,263 = 2,516,420,298.
     set_default_env("DIALOG_GCD_BODY_HOST_CIN", "1");
     set_default_env("DIALOG_GCD_LATE_BORROW_UV_HIGH", "1");
+    // Late bands (12-15, the most-converged GCD steps) deepened 1 -> 2: drops one
+    // more ripple-carry bit per band, value-exact on the reachable support (those
+    // carry bits are provably 0 once the GCD has converged). Stacked with
+    // WIDTH_SLOPE=1010 above under one shared island on the 1320q base.
     set_default_env(
         "DIALOG_GCD_BODY_CARRY_BAND_TRIMS",
-        "0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1",
+        "0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2",
     );
     // 1320q apply teardown: low-q final chunk plus a hosted boundary split at
     // the second custom-five cut. The retained carry at bit 100 hosts the
@@ -31789,7 +31793,9 @@ fn configure_ecdsafail_submission_route() {
     // 1008 -> 1009: one more notch on the per-step width-envelope shrink rate,
     // reclaimed on the 1320q base. Peak-neutral at 1320q; the tighter late-step
     // widths stay within the provably-|0> converged GCD region. ~-512 avg-T.
-    set_default_env("DIALOG_GCD_WIDTH_SLOPE_X1000", "1009");
+    // 1009 -> 1010: one further notch, stacked with the band-trim late-band
+    // deepening below under one shared island. Peak-neutral at 1320q.
+    set_default_env("DIALOG_GCD_WIDTH_SLOPE_X1000", "1010");
     // Active-395 island on the promoted 1355q base: validated 0/0/0 over all
     // 9024 shots at 1355q x 1,773,011 T.
     set_default_env("DIALOG_REROLL", "4269");
@@ -31817,7 +31823,10 @@ fn configure_ecdsafail_submission_route() {
     // 0/0/0 over all 9024 shots at 1320q x 1,557,239 T = 2,055,555,480. Found by a
     // parallel early-exit tail-nonce sweep on 192-core boxes, then confirmed with
     // the official full-9024 eval_circuit.
-    set_default_env("DIALOG_TAIL_NONCE", "11000665");
+    // Re-rolled again for the added WIDTH_SLOPE=1010 + band-late-trim=2 notches:
+    // nonce=22000964 lands a clean island, validated 0/0/0 over all 9024 shots at
+    // 1320q x 1,556,187 T = 2,054,166,840.
+    set_default_env("DIALOG_TAIL_NONCE", "22000964");
     // Fuse the branch-bit comparator with the b0-controlled log update: derive
     // b0_and_b1 from the in-flight comparator carry instead of materializing a
     // separate cmp qubit and recomputing the comparator for uncompute. Pure
