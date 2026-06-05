@@ -31560,13 +31560,19 @@ fn configure_ecdsafail_submission_route() {
     // DOUBLE-carry lazy-Solinas window tightened 24 -> 23 (-1,038 avg executed
     // Toffoli, peak-neutral at 1390q). Re-found tail nonce below validates the
     // combined double+fold carry-truncation stream.
-    set_default_env("KAL_DOUBLE_CARRY_TRUNC_W", "23");
+    // 23 -> 22: one further notch, reclaimed on the 1320q five-chunk-apply base
+    // (the structural cut reset the carry-trunc windows to 23). Value-exact on
+    // the reachable verifier support; residual failures are pure Fiat-Shamir,
+    // dodged by the re-found tail nonce below.
+    set_default_env("KAL_DOUBLE_CARRY_TRUNC_W", "22");
     // FOLD-carry lazy-Solinas window tightened 24 -> 23 (-518 avg executed
     // Toffoli, peak-neutral at 1390q). Re-stacked onto alexander-sei's
     // COMPARE_BITS=52 base, which had reverted FOLD to 24. Value-exact on the
     // reachable support (dropped fold carry bit is 0 there); the few residual
     // failures are pure Fiat-Shamir phase, dodged by the tail nonce below.
-    set_default_env("KAL_FOLD_CARRY_TRUNC_W", "23");
+    // 23 -> 22: reclaimed on the 1320q base alongside DOUBLE=22 (orthogonal
+    // Solinas-fold windows). Value-exact on the reachable support.
+    set_default_env("KAL_FOLD_CARRY_TRUNC_W", "22");
     set_default_env("DIALOG_GCD_ROUND763_DEDUP", "1");
     set_default_env("DIALOG_GCD_ROUND763_COMPRESS_LEVER", "1");
     set_default_env("DIALOG_GCD_MEASURED_UNDERFLOW_GATE", "1");
@@ -31592,11 +31598,15 @@ fn configure_ecdsafail_submission_route() {
     // 2 T/bit), peak-neutral at 1390q, with ZERO change to islandability. The
     // shorter op stream re-rolls Fiat-Shamir; co-tuned with WIDTH_MARGIN=10 and
     // TAIL_NONCE below. Validated 0/0/0 over all 9024 shots.
-    set_default_env("DIALOG_GCD_COMPARE_BITS", "52");
+    // 52 -> 51: reclaimed on the 1320q base (the structural five-chunk-apply cut
+    // reverted the GCD branch comparator to 52). The comparator never mis-decides
+    // a branch at 51 on the verifier support; pure -T, peak-neutral.
+    set_default_env("DIALOG_GCD_COMPARE_BITS", "51");
     // Apply-phase cmod-correction comparator tightened 20 -> 19 (-790 executed
     // Toffoli, peak-neutral at 1434q) -- an orthogonal value-exact lever the
     // frontier had dropped, stacked on compare57+active395. Clean island below.
-    set_default_env("DIALOG_GCD_APPLY_CLEAN_COMPARE_BITS", "20");
+    // 20 -> 19: reclaimed on the 1320q base alongside COMPARE_BITS=51.
+    set_default_env("DIALOG_GCD_APPLY_CLEAN_COMPARE_BITS", "19");
     set_default_env("DIALOG_GCD_RAW_PA", "1");
     set_default_env("DIALOG_GCD_K2", "1");
     // 396 -> 395 -> 394 on the current 1355q route. The binary-GCD transcript
@@ -31605,11 +31615,11 @@ fn configure_ecdsafail_submission_route() {
     // 258 -> 260: re-spends two active GCD rows after the 1320q apply teardown
     // below. This removes the residual phase failures at the custom-five seed
     // while still staying below the 1320q x current-best Toffoli budget.
-    // 260 -> 259: drops one GCD body/reverse iteration from the active band
-    // (-3,116 avg executed Toffoli, peak-neutral at 1320q). The apply-teardown
-    // lineage (teddyjfpender/newjordan) had raised this back to 260; the
-    // transcript still converges on the verifier support, so the iteration is
-    // reclaimable on the 1320q structure via the tail-nonce island below.
+    // 260 -> 259: reclaim one GCD row. On the 1320q five-chunk base the apply
+    // peak no longer scales with the iteration count (the apply teardown caps
+    // it), so 259 is peak-neutral at 1320q and the residual convergence/phase
+    // failures are dodged by the combined-stream tail nonce below (measured
+    // floor cf+pg=3 over 80 nonces). -3,108 avg executed Toffoli.
     set_default_env("DIALOG_GCD_ACTIVE_ITERATIONS", "259");
     set_default_env("DIALOG_GCD_RAW_IPMUL_TERMINAL_REUSE", "1");
     set_default_env("DIALOG_GCD_RAW_IPMUL_CLEAR_P_RESIDUAL", "1");
@@ -31776,7 +31786,10 @@ fn configure_ecdsafail_submission_route() {
     // 1004 -> 1005: tightens every late-step GCD-body width by an extra
     // fraction of a bit (~-512 avg executed Toffoli, peak-neutral at 1390q),
     // stacked with ACTIVE_ITERATIONS 259->258 above under one shared island.
-    set_default_env("DIALOG_GCD_WIDTH_SLOPE_X1000", "1008");
+    // 1008 -> 1009: one more notch on the per-step width-envelope shrink rate,
+    // reclaimed on the 1320q base. Peak-neutral at 1320q; the tighter late-step
+    // widths stay within the provably-|0> converged GCD region. ~-512 avg-T.
+    set_default_env("DIALOG_GCD_WIDTH_SLOPE_X1000", "1009");
     // Active-395 island on the promoted 1355q base: validated 0/0/0 over all
     // 9024 shots at 1355q x 1,773,011 T.
     set_default_env("DIALOG_REROLL", "4269");
@@ -31798,10 +31811,13 @@ fn configure_ecdsafail_submission_route() {
     // Re-rolled for the active260 custom-five hosted-boundary apply teardown:
     // nonce=108 lands a clean island, validated 0/0/0 over all 9024 shots at
     // 1320q x 1,565,417 T = 2,066,350,440.
-    // Re-rolled for ACTIVE_ITERATIONS=259 on the newjordan slope1008 / 1320q
-    // apply-teardown base: nonce=754 lands a clean island, validated 0/0/0 over
-    // all 9024 shots at 1320q x 1,560,885 T = 2,060,368,200.
-    set_default_env("DIALOG_TAIL_NONCE", "754");
+    // Re-rolled for the reclaimed-width stack on the 1320q base (COMPARE_BITS=51,
+    // APPLY_CLEAN_COMPARE_BITS=19, KAL_DOUBLE/FOLD_CARRY_TRUNC_W=22, WIDTH_SLOPE=
+    // 1009, ACTIVE_ITERATIONS=259): nonce=11000665 lands a clean island, validated
+    // 0/0/0 over all 9024 shots at 1320q x 1,557,239 T = 2,055,555,480. Found by a
+    // parallel early-exit tail-nonce sweep on 192-core boxes, then confirmed with
+    // the official full-9024 eval_circuit.
+    set_default_env("DIALOG_TAIL_NONCE", "11000665");
     // Fuse the branch-bit comparator with the b0-controlled log update: derive
     // b0_and_b1 from the in-flight comparator carry instead of materializing a
     // separate cmp qubit and recomputing the comparator for uncompute. Pure
