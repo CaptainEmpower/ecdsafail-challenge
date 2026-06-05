@@ -24887,13 +24887,34 @@ fn dialog_gcd_k2_enabled() -> bool {
     std::env::var("DIALOG_GCD_K2").ok().as_deref() == Some("1")
 }
 
+fn dialog_gcd_k2_pair_compress_enabled() -> bool {
+    dialog_gcd_k2_enabled()
+        && std::env::var("DIALOG_GCD_K2_PAIR_COMPRESS")
+            .ok()
+            .as_deref()
+            == Some("1")
+}
+
+fn dialog_gcd_sidecar_group_size() -> usize {
+    if dialog_gcd_k2_pair_compress_enabled() {
+        2
+    } else {
+        DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE
+    }
+}
+
 /// Compressed bits per transcript block. K=2 packs an extra `shift2` bit per step
 /// (GROUP_SIZE=3 steps) on top of the round763 6->5 base packing: 5 + 3 = 8.
 /// NOTE: the compile-time `DIALOG_GCD_HIGH_TAIL_ALIAS_BLOCK_BITS` const stays 5
 /// (it sizes fixed arrays in the high-tail machinery); this fn is for the dynamic
 /// compressed_log stride / indexing / runway only.
 fn dialog_gcd_block_bits() -> usize {
-    if dialog_gcd_k2_enabled() {
+    if dialog_gcd_k2_pair_compress_enabled() {
+        // Two K=2 steps have 6 raw transcript bits. The pair language has only
+        // 30 reachable states: the first five bits compress 15 -> 4, while the
+        // second shift2 bit stays raw. Total: 5 block bits for 2 steps.
+        DIALOG_GCD_HIGH_TAIL_ALIAS_BLOCK_BITS
+    } else if dialog_gcd_k2_enabled() {
         DIALOG_GCD_HIGH_TAIL_ALIAS_BLOCK_BITS + DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE
     } else {
         DIALOG_GCD_HIGH_TAIL_ALIAS_BLOCK_BITS
@@ -24904,9 +24925,9 @@ fn dialog_gcd_block_bits() -> usize {
 /// shift2. K1: 2*GROUP_SIZE=6; K2: 3*GROUP_SIZE=9.
 fn dialog_gcd_raw_block_len() -> usize {
     if dialog_gcd_k2_enabled() {
-        3 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE
+        3 * dialog_gcd_sidecar_group_size()
     } else {
-        2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE
+        2 * dialog_gcd_sidecar_group_size()
     }
 }
 pub const DIALOG_GCD_PA9024_COMPARE_SCHEDULE: [usize; 399] = [
@@ -26969,6 +26990,115 @@ fn emit_dialog_gcd_round763_compressor_inverse(b: &mut B, block: &[QubitId]) {
     b.ccx(block[4], block[5], block[3]);
 }
 
+fn emit_dialog_gcd_k2_pair_core_encoder(b: &mut B, core: &[QubitId]) {
+    assert_eq!(core.len(), 5);
+    b.x(core[1]);
+    b.cx(core[0], core[3]);
+    b.ccx(core[1], core[3], core[0]);
+    b.cx(core[0], core[1]);
+    b.cx(core[2], core[3]);
+    b.ccx(core[0], core[3], core[2]);
+    b.ccx(core[1], core[2], core[0]);
+    b.x(core[0]);
+    b.x(core[3]);
+    b.ccx(core[1], core[4], core[0]);
+    b.ccx(core[0], core[2], core[4]);
+    b.ccx(core[1], core[4], core[0]);
+}
+
+fn emit_dialog_gcd_k2_pair_core_encoder_inverse(b: &mut B, core: &[QubitId]) {
+    assert_eq!(core.len(), 5);
+    b.ccx(core[1], core[4], core[0]);
+    b.ccx(core[0], core[2], core[4]);
+    b.ccx(core[1], core[4], core[0]);
+    b.x(core[3]);
+    b.x(core[0]);
+    b.ccx(core[1], core[2], core[0]);
+    b.ccx(core[0], core[3], core[2]);
+    b.cx(core[2], core[3]);
+    b.cx(core[0], core[1]);
+    b.ccx(core[1], core[3], core[0]);
+    b.cx(core[0], core[3]);
+    b.x(core[1]);
+}
+
+fn dialog_gcd_k2_pair_core(raw_block: &[QubitId]) -> [QubitId; 5] {
+    assert_eq!(raw_block.len(), 6);
+    [
+        raw_block[0], // first step b0
+        raw_block[1], // first step b0_and_b1
+        raw_block[4], // first step shift2
+        raw_block[2], // second step b0
+        raw_block[3], // second step b0_and_b1
+    ]
+}
+
+fn dialog_gcd_k2_pair_copy_compressed_block_to_raw(
+    b: &mut B,
+    compressed_block: &[QubitId],
+    raw_block: &[QubitId],
+    steps: usize,
+) {
+    assert_eq!(compressed_block.len(), DIALOG_GCD_HIGH_TAIL_ALIAS_BLOCK_BITS);
+    assert_eq!(raw_block.len(), 6);
+    assert!((1..=2).contains(&steps));
+    let swap_host = dialog_gcd_apply_replay_swap_host_enabled();
+    if steps == 1 {
+        let raw_encoded = [raw_block[0], raw_block[1], raw_block[4]];
+        for (&c, &r) in compressed_block.iter().take(3).zip(raw_encoded.iter()) {
+            if swap_host {
+                b.swap(c, r);
+            } else {
+                b.cx(c, r);
+            }
+        }
+        return;
+    }
+    let raw_encoded = [raw_block[1], raw_block[4], raw_block[2], raw_block[3], raw_block[5]];
+    for (&c, &r) in compressed_block.iter().zip(raw_encoded.iter()) {
+        if swap_host {
+            b.swap(c, r);
+        } else {
+            b.cx(c, r);
+        }
+    }
+    let core = dialog_gcd_k2_pair_core(raw_block);
+    emit_dialog_gcd_k2_pair_core_encoder_inverse(b, &core);
+}
+
+fn dialog_gcd_k2_pair_clear_raw_block_copy(
+    b: &mut B,
+    compressed_block: &[QubitId],
+    raw_block: &[QubitId],
+    steps: usize,
+) {
+    assert_eq!(compressed_block.len(), DIALOG_GCD_HIGH_TAIL_ALIAS_BLOCK_BITS);
+    assert_eq!(raw_block.len(), 6);
+    assert!((1..=2).contains(&steps));
+    let swap_host = dialog_gcd_apply_replay_swap_host_enabled();
+    if steps == 1 {
+        let raw_encoded = [raw_block[0], raw_block[1], raw_block[4]];
+        for (&c, &r) in compressed_block.iter().take(3).zip(raw_encoded.iter()) {
+            if swap_host {
+                b.swap(c, r);
+            } else {
+                b.cx(c, r);
+            }
+        }
+        return;
+    }
+    let core = dialog_gcd_k2_pair_core(raw_block);
+    emit_dialog_gcd_k2_pair_core_encoder(b, &core);
+    let raw_encoded = [raw_block[1], raw_block[4], raw_block[2], raw_block[3], raw_block[5]];
+    for (&c, &r) in compressed_block.iter().zip(raw_encoded.iter()) {
+        if swap_host {
+            b.swap(c, r);
+        } else {
+            b.cx(c, r);
+        }
+    }
+}
+
 fn emit_dialog_gcd_round763_compressed_block_swapper(
     b: &mut B,
     pair: &[QubitId],
@@ -26988,8 +27118,8 @@ fn emit_dialog_gcd_round763_compressed_block_swapper(
 }
 
 fn dialog_gcd_compressed_sidecar_blocks() -> usize {
-    (dialog_gcd_active_iterations() + DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE - 1)
-        / DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE
+    let group_size = dialog_gcd_sidecar_group_size();
+    (dialog_gcd_active_iterations() + group_size - 1) / group_size
 }
 
 fn dialog_gcd_compressed_sidecar_bits() -> usize {
@@ -26997,7 +27127,7 @@ fn dialog_gcd_compressed_sidecar_bits() -> usize {
 }
 
 fn dialog_gcd_compressed_sidecar_block(compressed_log: &[QubitId], step: usize) -> &[QubitId] {
-    let block = step / DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE;
+    let block = step / dialog_gcd_sidecar_group_size();
     let bb = dialog_gcd_block_bits();
     let start = block * bb;
     &compressed_log[start..start + bb]
@@ -27305,17 +27435,17 @@ fn dialog_gcd_reverse_raw_block_host<'a>(
     let (start, _) = dialog_gcd_compressed_sidecar_block_step_range(block);
     let active_width = dialog_gcd_tobitvector_active_width(start);
     let want = 2 * active_width - 1;
-    if u.len().saturating_sub(active_width) >= want + 2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE {
-        let candidate = &u[u.len() - 2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE..];
+    if u.len().saturating_sub(active_width) >= want + 2 * dialog_gcd_sidecar_group_size() {
+        let candidate = &u[u.len() - 2 * dialog_gcd_sidecar_group_size()..];
         if !dialog_gcd_compressed_log_u_high_runway_enabled()
             || !dialog_gcd_slice_intersects(candidate, compressed_log)
         {
             return Some(candidate);
         }
     }
-    let future_start = (block + 1) * DIALOG_GCD_HIGH_TAIL_ALIAS_BLOCK_BITS;
+    let future_start = (block + 1) * dialog_gcd_block_bits();
     let future = compressed_log.get(future_start..)?;
-    let raw_bits = 2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE;
+    let raw_bits = 2 * dialog_gcd_sidecar_group_size();
     if future.len() < want + raw_bits {
         return None;
     }
@@ -27342,10 +27472,10 @@ fn dialog_gcd_forward_raw_block_host<'a>(
     let (start, _) = dialog_gcd_compressed_sidecar_block_step_range(block);
     let active_width = dialog_gcd_tobitvector_active_width(start);
     let want = 2 * active_width - 1;
-    let future_start = (block + 1) * DIALOG_GCD_HIGH_TAIL_ALIAS_BLOCK_BITS;
+    let future_start = (block + 1) * dialog_gcd_block_bits();
     if let Some(future) = compressed_log.get(future_start..) {
-        if future.len() >= want + 2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE {
-            let raw_bits = 2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE;
+        if future.len() >= want + 2 * dialog_gcd_sidecar_group_size() {
+            let raw_bits = 2 * dialog_gcd_sidecar_group_size();
             if !dialog_gcd_compressed_log_u_high_runway_enabled() {
                 return Some(&future[future.len() - raw_bits..]);
             }
@@ -27358,8 +27488,8 @@ fn dialog_gcd_forward_raw_block_host<'a>(
             }
         }
     }
-    if u.len().saturating_sub(active_width) >= want + 2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE {
-        let candidate = &u[u.len() - 2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE..];
+    if u.len().saturating_sub(active_width) >= want + 2 * dialog_gcd_sidecar_group_size() {
+        let candidate = &u[u.len() - 2 * dialog_gcd_sidecar_group_size()..];
         if !dialog_gcd_compressed_log_u_high_runway_enabled()
             || !dialog_gcd_slice_intersects(candidate, compressed_log)
         {
@@ -27390,7 +27520,7 @@ fn dialog_gcd_compressed_sidecar_future_carry_slice(
     } else {
         carry_need
     };
-    let next_block = step / DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE + 1;
+    let next_block = step / dialog_gcd_sidecar_group_size() + 1;
     let start = next_block * dialog_gcd_block_bits();
     compressed_log
         .get(start..)
@@ -27399,8 +27529,9 @@ fn dialog_gcd_compressed_sidecar_future_carry_slice(
 }
 
 fn dialog_gcd_compressed_sidecar_block_step_range(block: usize) -> (usize, usize) {
-    let start = block * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE;
-    let end = (start + DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE).min(dialog_gcd_active_iterations());
+    let group_size = dialog_gcd_sidecar_group_size();
+    let start = block * group_size;
+    let end = (start + group_size).min(dialog_gcd_active_iterations());
     (start, end)
 }
 
@@ -27408,9 +27539,14 @@ fn dialog_gcd_copy_compressed_block_to_raw(
     b: &mut B,
     compressed_block: &[QubitId],
     raw_block: &[QubitId],
+    steps: usize,
 ) {
+    if dialog_gcd_k2_pair_compress_enabled() {
+        dialog_gcd_k2_pair_copy_compressed_block_to_raw(b, compressed_block, raw_block, steps);
+        return;
+    }
     let base_bits = DIALOG_GCD_HIGH_TAIL_ALIAS_BLOCK_BITS; // 5
-    let raw_base = 2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE; // 6
+    let raw_base = 2 * dialog_gcd_sidecar_group_size(); // 6
     assert_eq!(compressed_block.len(), dialog_gcd_block_bits());
     assert_eq!(raw_block.len(), dialog_gcd_raw_block_len());
     let swap_host = dialog_gcd_apply_replay_swap_host_enabled();
@@ -27433,9 +27569,18 @@ fn dialog_gcd_copy_compressed_block_to_raw(
     }
 }
 
-fn dialog_gcd_clear_raw_block_copy(b: &mut B, compressed_block: &[QubitId], raw_block: &[QubitId]) {
+fn dialog_gcd_clear_raw_block_copy(
+    b: &mut B,
+    compressed_block: &[QubitId],
+    raw_block: &[QubitId],
+    steps: usize,
+) {
+    if dialog_gcd_k2_pair_compress_enabled() {
+        dialog_gcd_k2_pair_clear_raw_block_copy(b, compressed_block, raw_block, steps);
+        return;
+    }
     let base_bits = DIALOG_GCD_HIGH_TAIL_ALIAS_BLOCK_BITS;
-    let raw_base = 2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE;
+    let raw_base = 2 * dialog_gcd_sidecar_group_size();
     assert_eq!(compressed_block.len(), dialog_gcd_block_bits());
     assert_eq!(raw_block.len(), dialog_gcd_raw_block_len());
     let swap_host = dialog_gcd_apply_replay_swap_host_enabled();
@@ -27583,7 +27728,7 @@ fn emit_dialog_gcd_compressed_sidecar_tobitvector_steps_block_lifecycle(
                 // first shift) into the sidecar, then conditionally shift v_active
                 // right once more. Free 1-bit shift is a relabel; this 2nd shift is
                 // data-dependent (cswap cascade), ~aw CCX.
-                let s2 = raw_block[2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE + slot];
+                let s2 = raw_block[2 * dialog_gcd_sidecar_group_size() + slot];
                 let v0 = v_active[0];
                 if std::env::var("DIALOG_GCD_K2_FORCE0").ok().as_deref() != Some("1") {
                     b.cx(v0, s2);
@@ -27601,8 +27746,6 @@ fn emit_dialog_gcd_compressed_sidecar_tobitvector_steps_block_lifecycle(
 
         b.set_phase("dialog_gcd_compressed_block_tobitvector_compress_block");
         let base_bits = DIALOG_GCD_HIGH_TAIL_ALIAS_BLOCK_BITS; // 5
-        let raw_base = 2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE; // 6
-        emit_dialog_gcd_round763_compressor(b, &raw_block[0..raw_base]);
         let compressed_block = dialog_gcd_compressed_sidecar_block(compressed_log, start);
         if dialog_gcd_compressed_log_u_high_runway_enabled() {
             // A parked forward block is first written only after its high-u
@@ -27615,12 +27758,18 @@ fn emit_dialog_gcd_compressed_sidecar_tobitvector_steps_block_lifecycle(
                 "compressed-log runway overlaps active forward u prefix at block {block}"
             );
         }
-        for i in 0..base_bits {
-            b.swap(raw_block[i], compressed_block[i]);
-        }
-        // K=2: stash the 3 raw shift2 bits raw[6..] into compressed_block[5..].
-        for j in base_bits..dialog_gcd_block_bits() {
-            b.swap(raw_block[raw_base + (j - base_bits)], compressed_block[j]);
+        if dialog_gcd_k2_pair_compress_enabled() {
+            dialog_gcd_k2_pair_clear_raw_block_copy(b, compressed_block, raw_block, end - start);
+        } else {
+            let raw_base = 2 * dialog_gcd_sidecar_group_size(); // 6
+            emit_dialog_gcd_round763_compressor(b, &raw_block[0..raw_base]);
+            for i in 0..base_bits {
+                b.swap(raw_block[i], compressed_block[i]);
+            }
+            // K=2: stash the shift2 bits raw[raw_base..] into compressed_block[5..].
+            for j in base_bits..dialog_gcd_block_bits() {
+                b.swap(raw_block[raw_base + (j - base_bits)], compressed_block[j]);
+            }
         }
         if !owned_raw_block.is_empty() {
             b.free_vec(&owned_raw_block);
@@ -27672,14 +27821,23 @@ fn emit_dialog_gcd_compressed_sidecar_tobitvector_steps_reverse_block_lifecycle(
         }
         {
             let base_bits = DIALOG_GCD_HIGH_TAIL_ALIAS_BLOCK_BITS; // 5
-            let raw_base = 2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE; // 6
-            for i in 0..base_bits {
-                b.swap(compressed_block[i], raw_block[i]);
-            }
-            emit_dialog_gcd_round763_compressor_inverse(b, &raw_block[0..raw_base]);
-            // K=2: bring the 3 shift2 bits compressed[5..] -> raw[6..].
-            for j in base_bits..dialog_gcd_block_bits() {
-                b.swap(compressed_block[j], raw_block[raw_base + (j - base_bits)]);
+            if dialog_gcd_k2_pair_compress_enabled() {
+                dialog_gcd_k2_pair_copy_compressed_block_to_raw(
+                    b,
+                    compressed_block,
+                    raw_block,
+                    end - start,
+                );
+            } else {
+                let raw_base = 2 * dialog_gcd_sidecar_group_size(); // 6
+                for i in 0..base_bits {
+                    b.swap(compressed_block[i], raw_block[i]);
+                }
+                emit_dialog_gcd_round763_compressor_inverse(b, &raw_block[0..raw_base]);
+                // K=2: bring the shift2 bits compressed[5..] -> raw[raw_base..].
+                for j in base_bits..dialog_gcd_block_bits() {
+                    b.swap(compressed_block[j], raw_block[raw_base + (j - base_bits)]);
+                }
             }
         }
 
@@ -27697,7 +27855,7 @@ fn emit_dialog_gcd_compressed_sidecar_tobitvector_steps_reverse_block_lifecycle(
                 // mirror of forward K=2: conditional un-shift (reverse cswap order),
                 // then uncompute s2 back to |0> (v_active[0] is restored after the
                 // un-shift to the value s2 was derived from).
-                let s2 = raw_block[2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE + slot];
+                let s2 = raw_block[2 * dialog_gcd_sidecar_group_size() + slot];
                 for i in (0..v_active.len().saturating_sub(1)).rev() {
                     let (lo, hi) = (v_active[i], v_active[i + 1]);
                     cswap(b, s2, lo, hi);
@@ -27812,7 +27970,7 @@ fn emit_dialog_gcd_compressed_sidecar_apply_bitvector_block_lifecycle(
         let compressed_block = dialog_gcd_compressed_sidecar_block(compressed_log, start);
 
         b.set_phase("dialog_gcd_compressed_block_apply_decompress_block");
-        dialog_gcd_copy_compressed_block_to_raw(b, compressed_block, raw_block);
+        dialog_gcd_copy_compressed_block_to_raw(b, compressed_block, raw_block, end - start);
         let clean_scratch = if dialog_gcd_apply_replay_swap_host_enabled() {
             compressed_block
         } else {
@@ -27832,7 +27990,7 @@ fn emit_dialog_gcd_compressed_sidecar_apply_bitvector_block_lifecycle(
                 // mirror the forward K=2 second shift: conditional 2nd double of y.
                 // MUST use the lazy (Solinas, truncated) controlled double so it
                 // composes with the uncontrolled mod_double_inplace_fast above.
-                let s2 = raw_block[2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE + slot];
+                let s2 = raw_block[2 * dialog_gcd_sidecar_group_size() + slot];
                 cmod_double_inplace_lazy(b, y, p, s2);
             }
 
@@ -27859,7 +28017,7 @@ fn emit_dialog_gcd_compressed_sidecar_apply_bitvector_block_lifecycle(
         }
 
         b.set_phase("dialog_gcd_compressed_block_apply_clear_block_copy");
-        dialog_gcd_clear_raw_block_copy(b, compressed_block, raw_block);
+        dialog_gcd_clear_raw_block_copy(b, compressed_block, raw_block, end - start);
     }
 }
 
@@ -27880,7 +28038,7 @@ fn emit_dialog_gcd_compressed_sidecar_apply_bitvector_reverse_exact_block_lifecy
         let compressed_block = dialog_gcd_compressed_sidecar_block(compressed_log, start);
 
         b.set_phase("dialog_gcd_compressed_block_apply_reverse_decompress_block");
-        dialog_gcd_copy_compressed_block_to_raw(b, compressed_block, raw_block);
+        dialog_gcd_copy_compressed_block_to_raw(b, compressed_block, raw_block, end - start);
         let clean_scratch = if dialog_gcd_apply_replay_swap_host_enabled() {
             compressed_block
         } else {
@@ -27920,13 +28078,13 @@ fn emit_dialog_gcd_compressed_sidecar_apply_bitvector_reverse_exact_block_lifecy
             {
                 // mirror the forward K=2 second shift: conditional 2nd halve of y.
                 // MUST use the lazy (Solinas, truncated) controlled halve to match.
-                let s2 = raw_block[2 * DIALOG_GCD_HIGH_TAIL_ALIAS_GROUP_SIZE + slot];
+                let s2 = raw_block[2 * dialog_gcd_sidecar_group_size() + slot];
                 cmod_halve_inplace_lazy(b, y, p, s2);
             }
         }
 
         b.set_phase("dialog_gcd_compressed_block_apply_reverse_clear_block_copy");
-        dialog_gcd_clear_raw_block_copy(b, compressed_block, raw_block);
+        dialog_gcd_clear_raw_block_copy(b, compressed_block, raw_block, end - start);
     }
 }
 
@@ -32126,17 +32284,20 @@ fn configure_ecdsafail_submission_route() {
     // TAIL_NONCE below. Validated 0/0/0 over all 9024 shots.
     // Final-window W2 spends two branch-comparator bits back for a much denser
     // clean island while retaining a lower score than the current frontier.
-    // Re-tighten 47 -> 46 on the stacked W2 base (the branch comparator had slack
-    // restored by the structural island; it still decides every branch correctly
-    // on the reachable support at 46). Stacked under the nonce-20397 island below.
-    set_default_env("DIALOG_GCD_COMPARE_BITS", "45");
-    // The apply clean comparator is also backed off to 20 for the same island.
-    // Re-tighten 20 -> 19 on the W2 base (orthogonal apply-phase cmod-correction
-    // comparator). Confirmed value-exact on the reachable support via the shared
-    // re-rolled island below.
-    set_default_env("DIALOG_GCD_APPLY_CLEAN_COMPARE_BITS", "18");
+    // K2 pair-compressed route spends one branch-comparator bit back from the
+    // newest frontier cut. This keeps the lower 1313q tier while landing a much
+    // denser clean island than the 45-bit edge.
+    set_default_env("DIALOG_GCD_COMPARE_BITS", "46");
+    // Spend one apply-clean comparator bit back as well. The extra guard costs
+    // 681 executed Toffoli on this route and still beats the current frontier.
+    set_default_env("DIALOG_GCD_APPLY_CLEAN_COMPARE_BITS", "20");
     set_default_env("DIALOG_GCD_RAW_PA", "1");
     set_default_env("DIALOG_GCD_K2", "1");
+    // K2 pair transcript compressor: pack two K2 transcript steps into five
+    // sidecar bits by using the local reachability constraint between step A's
+    // shift2 bit and step B's low branch bit. This cuts the current transcript
+    // peak into the 1313q tier at a small Toffoli cost.
+    set_default_env("DIALOG_GCD_K2_PAIR_COMPRESS", "1");
     // 396 -> 395 -> 394 on the current 1355q route. The binary-GCD transcript
     // still converges on the verifier support for the Fiat-Shamir island below,
     // while dropping two full GCD body/reverse steps.
@@ -32354,10 +32515,11 @@ fn configure_ecdsafail_submission_route() {
     // Re-rolled again for the stacked WIDTH_SLOPE 1011->1012 notch: nonce 10429
     // lands a clean island, validated 0/0/0 over all 9024 shots at
     // 1320q x 1,534,277 T = 2,025,245,640.
-    // Value-exact -1q (1320 -> 1319): no-physical-c_in selected add/sub body,
-    // tail nonce 620000849 lands a clean island on this frontier base.
+    // Pair-compressed 46/20 island: nonce 689 lands a clean trusted run,
+    // validated 0/0/0 over all 9024 shots at
+    // 1313q x 1,536,923 T = 2,017,979,899.
     set_default_env("DIALOG_GCD_SELECTED_BODY_NOCIN", "1");
-    set_default_env("DIALOG_TAIL_NONCE", "120002648");
+    set_default_env("DIALOG_TAIL_NONCE", "689");
     set_default_env("DIALOG_GCD_APPLY_FINAL_WINDOWED_FAST_BLOCKS", "2");
     // Fuse the branch-bit comparator with the b0-controlled log update: derive
     // b0_and_b1 from the in-flight comparator carry instead of materializing a
