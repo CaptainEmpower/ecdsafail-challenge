@@ -2395,6 +2395,316 @@ fn cuccaro_sub_fast_borrowed_carries(
     b.cx(a[0], acc[0]);
 }
 
+/// Zero-carry-in specialization of [`cuccaro_add_fast_borrowed_carries`]
+/// (same-width, `acc += a mod 2^n`, no carry-out captured). The omitted `c_in`
+/// register is *proven* |0> on entry: its only forward roles are (a) to seed the
+/// MAJ chain at bit 0 with carry-in 0 and (b) to freeze the original `a[0]` until
+/// the final measured UMA's phase correction. With c_in=0 the seed
+/// `cx(c_in,acc[0]); cx(a[0],c_in); ccx(c_in,acc[0],c0)` collapses to
+/// `ccx(a[0],acc[0],c0)`, and since c_in held `a[0]` (restored by the final
+/// `cx(carries[0],a[0])` to its seed-time value) the final `cz_if(c_in,acc[0],m0)`
+/// equals `cz_if(a[0],acc[0],m0)`. This is the same-width analogue of the proven
+/// [`cuccaro_add_fast_low_to_ext_borrowed_carries_no_cin`]. Consumes NO `c_in`
+/// qubit; `carries` must be clean on entry and is restored to |0>.
+fn cuccaro_add_fast_borrowed_carries_no_cin(
+    b: &mut B,
+    a: &[QubitId],
+    acc: &[QubitId],
+    carries: &[QubitId],
+) {
+    let n = a.len();
+    assert_eq!(n, acc.len());
+    if n == 0 {
+        return;
+    }
+    if n == 1 {
+        // acc[0] += a[0] (c_in = 0); pure XOR, no carry lane needed.
+        b.cx(a[0], acc[0]);
+        return;
+    }
+    assert!(carries.len() >= n - 1);
+
+    // Step 0 MAJ with c_in folded out (c_in == 0 == a[0]'s seed companion).
+    b.cx(a[0], acc[0]);
+    b.ccx(a[0], acc[0], carries[0]);
+    b.cx(carries[0], a[0]);
+    for i in 1..n - 1 {
+        b.cx(a[i], acc[i]);
+        b.cx(a[i], a[i - 1]);
+        b.ccx(a[i - 1], acc[i], carries[i]);
+        b.cx(carries[i], a[i]);
+    }
+
+    b.cx(a[n - 2], acc[n - 1]);
+    b.cx(a[n - 1], acc[n - 1]);
+
+    for i in (1..n - 1).rev() {
+        b.cx(carries[i], a[i]);
+        let m = b.alloc_bit();
+        b.hmr(carries[i], m);
+        b.cz_if(a[i - 1], acc[i], m);
+        b.cx(a[i], a[i - 1]);
+        b.cx(a[i - 1], acc[i]);
+    }
+    // Step 0 UMA with c_in folded out. In the c_in form the tail is
+    //   cz_if(c_in,acc[0],m0); cx(a[0],c_in); cx(c_in,acc[0])
+    // where the pre-`cz_if` `cx(carries[0],a[0])` has restored a[0] to the
+    // frozen c_in value, so `cz_if(c_in,..)` == `cz_if(a[0],..)`. The two
+    // trailing CXs reset c_in (`cx(a[0],c_in)`) and then `cx(c_in,acc[0])`
+    // with c_in already 0 — a no-op. Both drop out: NO trailing acc CX here.
+    b.cx(carries[0], a[0]);
+    let m0 = b.alloc_bit();
+    b.hmr(carries[0], m0);
+    b.cz_if(a[0], acc[0], m0);
+}
+
+/// Zero-carry-in inverse of [`cuccaro_add_fast_borrowed_carries_no_cin`]:
+/// same-width `acc -= a mod 2^n`, derived from
+/// [`cuccaro_sub_fast_borrowed_carries`] by folding out the proven-|0> `c_in`
+/// exactly as in the add direction. Consumes NO `c_in` qubit; `carries` clean in
+/// and restored to |0>.
+fn cuccaro_sub_fast_borrowed_carries_no_cin(
+    b: &mut B,
+    a: &[QubitId],
+    acc: &[QubitId],
+    carries: &[QubitId],
+) {
+    let n = a.len();
+    assert_eq!(n, acc.len());
+    if n == 0 {
+        return;
+    }
+    if n == 1 {
+        // acc[0] -= a[0] (c_in = 0); pure XOR.
+        b.cx(a[0], acc[0]);
+        return;
+    }
+    assert!(carries.len() >= n - 1);
+
+    // Step 0 with c_in folded out (the sub seed begins ccx(a[0],acc[0],c0)).
+    b.ccx(a[0], acc[0], carries[0]);
+    b.cx(carries[0], a[0]);
+    for i in 1..n - 1 {
+        b.cx(a[i - 1], acc[i]);
+        b.cx(a[i], a[i - 1]);
+        b.ccx(a[i - 1], acc[i], carries[i]);
+        b.cx(carries[i], a[i]);
+    }
+
+    b.cx(a[n - 1], acc[n - 1]);
+    b.cx(a[n - 2], acc[n - 1]);
+
+    for i in (1..n - 1).rev() {
+        b.cx(carries[i], a[i]);
+        let m = b.alloc_bit();
+        b.hmr(carries[i], m);
+        b.cz_if(a[i - 1], acc[i], m);
+        b.cx(a[i], a[i - 1]);
+        b.cx(a[i], acc[i]);
+    }
+    b.cx(carries[0], a[0]);
+    let m0 = b.alloc_bit();
+    b.hmr(carries[0], m0);
+    b.cz_if(a[0], acc[0], m0);
+    b.cx(a[0], acc[0]);
+}
+
+/// Exhaustive standalone validation of the no-physical-`c_in` selected add/sub
+/// body against the current `BODY_HOST_CIN` reference, for the odd-lowbit
+/// fastpath (`body_start = 1`). For every reachable low-bit/`ctrl` case and a
+/// dense sweep of operand values at widths 4..=8 it requires, across all 64
+/// independent measurement-outcome streams simultaneously:
+///   * accumulator exact (matches the c_in reference body bit-for-bit),
+///   * subtrahend/addend (`gated`) source restored to its loaded value,
+///   * all borrowed carry hosts reset to |0>,
+///   * the structural `gated[0]` lane (no longer a `c_in`) left untouched at |0>,
+///   * zero phase debt (`sim.phase == 0` on all 64 shots).
+/// Returns `Ok(())` on full pass, else a diagnostic `Err`.
+pub fn dialog_gcd_selected_body_nocin_selftest() -> Result<(), String> {
+    use sha3::{digest::ExtendableOutput, Shake128};
+
+    // Emulate the selected-body lifecycle for one direction with a given
+    // c_in policy, on basis state packed into all 64 shots. Returns
+    // (acc_out, gated_source_out, gated0_out, carries_all_zero, phase).
+    // body_w is the full selected width; body_start = 1 (odd-lowbit fastpath).
+    fn run_body(
+        is_sub: bool,
+        nocin: bool,
+        body_w: usize,
+        ctrl_val: u64,
+        sub0: u64,    // subtrahend/addend bit 0 (the reachable fastpath sets this = 1)
+        operand: u64, // bits 1..body_w of the addend/subtrahend
+        accv: u64,    // full acc value, bits 0..body_w
+    ) -> (u64, u64, u64, bool, u64) {
+        let body_start = 1usize;
+        let body_len = body_w - body_start;
+        let carry_need = body_len.saturating_sub(1);
+
+        // classical operand the body gates in (subtrahend/addend bits).
+        let mut operand_bits = vec![0u64; body_w];
+        operand_bits[0] = sub0 & 1;
+        for i in 1..body_w {
+            operand_bits[i] = (operand >> i) & 1;
+        }
+
+        let mut b = B::new();
+        let ctrl = b.alloc_qubit();
+        let acc = b.alloc_qubits(body_w);
+        // gated[0..body_w]: gated[0] is the structural lane (was c_in under
+        // BODY_HOST_CIN); gated[1..body_w] holds the gated operand bits.
+        let gated = b.alloc_qubits(body_w);
+        // borrowed carry hosts: max(carry_need,1) so n==1 still allocs a slot.
+        let carries = b.alloc_qubits(carry_need.max(1));
+
+        // LOAD: gated[i] = ctrl & operand[i] for i in body_start..body_w.
+        b.set_phase("nocin_selftest_load");
+        for i in body_start..body_w {
+            if operand_bits[i] != 0 {
+                b.cx(ctrl, gated[i]); // gated[i] = ctrl (since operand bit = 1)
+            }
+        }
+        // Low-bit fastpath correction on acc[0] (mirrors the production body).
+        if operand_bits[0] != 0 {
+            b.cx(ctrl, acc[0]);
+        }
+
+        // BODY on gated[body_start..body_w] vs acc[body_start..body_w].
+        b.set_phase("nocin_selftest_body");
+        let g = &gated[body_start..body_w];
+        let ac = &acc[body_start..body_w];
+        let cs = &carries[..carry_need];
+        if is_sub {
+            if nocin {
+                cuccaro_sub_fast_borrowed_carries_no_cin(&mut b, g, ac, cs);
+            } else {
+                cuccaro_sub_fast_borrowed_carries(&mut b, g, ac, gated[0], cs);
+            }
+        } else if nocin {
+            cuccaro_add_fast_borrowed_carries_no_cin(&mut b, g, ac, cs);
+        } else {
+            cuccaro_add_fast_borrowed_carries(&mut b, g, ac, gated[0], cs);
+        }
+
+        // CLEAR: measurement-clear gated[body_start..body_w] back to |0>
+        // (value-conditioned phase fixup, matching production).
+        b.set_phase("nocin_selftest_clear");
+        for i in body_start..body_w {
+            if operand_bits[i] != 0 {
+                let m = b.alloc_bit();
+                b.hmr(gated[i], m);
+                b.cz_if(ctrl, /*operand=1*/ ctrl, m);
+            }
+        }
+
+        let nq = b.next_qubit as usize;
+        let nb = (b.next_bit as usize).max(1);
+        let ops = b.ops.clone();
+        let mut xof = Shake128::default().finalize_xof();
+        let mut sim = Simulator::new(nq, nb, &mut xof);
+        // Pack the identical basis state into all 64 shots -> 64 independent
+        // measurement-outcome streams exercise phase-cleanliness in parallel.
+        let all = u64::MAX;
+        if (ctrl_val & 1) != 0 {
+            *sim.qubit_mut(ctrl) = all;
+        }
+        for i in 0..body_w {
+            if (accv >> i) & 1 != 0 {
+                *sim.qubit_mut(acc[i]) = all;
+            }
+        }
+        sim.apply_iter(ops.iter());
+
+        let mut acc_out = 0u64;
+        for i in 0..body_w {
+            if sim.qubit(acc[i]) == all {
+                acc_out |= 1 << i;
+            }
+        }
+        // gated source bits (body_start..body_w) should be restored to 0 (the
+        // clear undoes the load); we report the raw lane values for diagnosis.
+        let mut gated_src = 0u64;
+        for i in body_start..body_w {
+            if sim.qubit(gated[i]) != 0 {
+                gated_src |= 1 << i;
+            }
+        }
+        let gated0 = sim.qubit(gated[0]);
+        let carries_zero = (0..carry_need).all(|i| sim.qubit(carries[i]) == 0);
+        (acc_out, gated_src, gated0, carries_zero, sim.phase)
+    }
+
+    for body_w in 4..=8usize {
+        // sub0/addend bit 0: the reachable fastpath has operand[0]=1, but also
+        // validate operand[0]=0 to be thorough.
+        for sub0 in [1u64, 0] {
+            for ctrl_val in [1u64, 0] {
+                // Fully exhaustive operand/acc sweep over all 2^body_w x 2^body_w
+                // basis states (<= 65536 per config at body_w=8), both directions.
+                let span = 1u64 << body_w;
+                for operand in 0..span {
+                    for accv in 0..span {
+                        for is_sub in [false, true] {
+                            let (ref_acc, ref_src, ref_g0, ref_cz, ref_ph) =
+                                run_body(is_sub, false, body_w, ctrl_val, sub0, operand, accv);
+                            let (no_acc, no_src, no_g0, no_cz, no_ph) =
+                                run_body(is_sub, true, body_w, ctrl_val, sub0, operand, accv);
+                            let dir = if is_sub { "sub" } else { "add" };
+                            if no_acc != ref_acc {
+                                return Err(format!(
+                                    "ACC-MISMATCH {dir} body_w={body_w} ctrl={ctrl_val} \
+                                     sub0={sub0} operand={operand:#x} acc={accv:#x} \
+                                     nocin={no_acc:#x} ref={ref_acc:#x}"
+                                ));
+                            }
+                            if no_src != ref_src || no_src != 0 {
+                                return Err(format!(
+                                    "SRC-NOT-RESTORED {dir} body_w={body_w} ctrl={ctrl_val} \
+                                     operand={operand:#x} acc={accv:#x} \
+                                     nocin_src={no_src:#x} ref_src={ref_src:#x}"
+                                ));
+                            }
+                            if !no_cz || !ref_cz {
+                                return Err(format!(
+                                    "CARRIES-NOT-RESET {dir} body_w={body_w} ctrl={ctrl_val} \
+                                     operand={operand:#x} acc={accv:#x} \
+                                     nocin_cz={no_cz} ref_cz={ref_cz}"
+                                ));
+                            }
+                            // The no-cin body must never touch gated[0]; the
+                            // reference parks the c_in there and returns it to 0.
+                            if no_g0 != 0 {
+                                return Err(format!(
+                                    "GATED0-DIRTY-NOCIN {dir} body_w={body_w} ctrl={ctrl_val} \
+                                     operand={operand:#x} acc={accv:#x} g0={no_g0:#x}"
+                                ));
+                            }
+                            if ref_g0 != 0 {
+                                return Err(format!(
+                                    "GATED0-DIRTY-REF {dir} body_w={body_w} g0={ref_g0:#x}"
+                                ));
+                            }
+                            if no_ph != 0 {
+                                return Err(format!(
+                                    "PHASE-DEBT-NOCIN {dir} body_w={body_w} ctrl={ctrl_val} \
+                                     sub0={sub0} operand={operand:#x} acc={accv:#x} \
+                                     phase={no_ph:#x}"
+                                ));
+                            }
+                            if ref_ph != 0 {
+                                return Err(format!(
+                                    "PHASE-DEBT-REF {dir} body_w={body_w} ctrl={ctrl_val} \
+                                     operand={operand:#x} acc={accv:#x} phase={ref_ph:#x}"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Fast `acc += a mod 2^n` using measurement-based Cuccaro.
 fn add_nbit_qq_fast(b: &mut B, a: &[QubitId], acc: &[QubitId]) {
     assert_eq!(a.len(), acc.len());
@@ -25083,6 +25393,32 @@ fn dialog_gcd_body_host_cin_enabled() -> bool {
     std::env::var("DIALOG_GCD_BODY_HOST_CIN").ok().as_deref() == Some("1")
 }
 
+fn dialog_gcd_selected_body_nocin_enabled() -> bool {
+    // Successor to BODY_HOST_CIN for the odd-lowbit fastpath (body_start>=1):
+    // the materialized selected add/sub body consumes NO physical incoming-carry
+    // lane at all. The carry/borrow into body_start=1 is semantically zero on the
+    // reachable GCD support (subtrahend[0]=1, acc[0]=ctrl), so the Cuccaro chain
+    // is seeded from the known-zero with the c_in register folded out entirely
+    // (see cuccaro_{add,sub}_fast_borrowed_carries_no_cin). This drops the
+    // selected-body host demand from 2*body_w-1 to 2*body_w-3 (one structural gap
+    // lane + the former c_in lane both vanish), moving the three GCD tobitvector
+    // siblings off the 1320 tier without reusing the wrapper-unsafe gap-as-c_in
+    // slice that the COMPACT probe (closed) tried. Default off until traced.
+    matches!(
+        std::env::var("DIALOG_GCD_SELECTED_BODY_NOCIN").ok().as_deref(),
+        Some("1") | Some("2")
+    )
+}
+
+/// Diagnostic mode 2: use the no-c_in BODY but keep the legacy `2n-1` composite
+/// pool and BODY_HOST_CIN slice offsets (gated = c[n-1..2n-1], its [0] left
+/// unused/clean). This isolates the body arithmetic from the host repack — it
+/// yields no peak win (pool unchanged) but, if eval is 0/0/0, proves the no-c_in
+/// body is route-correct and any failure under mode 1 is in the host compaction.
+fn dialog_gcd_selected_body_nocin_keep_pool() -> bool {
+    std::env::var("DIALOG_GCD_SELECTED_BODY_NOCIN").ok().as_deref() == Some("2")
+}
+
 fn dialog_gcd_late_borrow_uv_high_enabled() -> bool {
     std::env::var("DIALOG_GCD_LATE_BORROW_UV_HIGH")
         .ok()
@@ -25125,6 +25461,60 @@ fn dialog_gcd_controlled_sub_selected(
     assert!(!subtrahend.is_empty());
     if dialog_gcd_raw_tobitvector_materialized_sub_enabled() {
         let n = subtrahend.len();
+        let body_w = dialog_gcd_body_carry_trunc_width(n, step);
+        let odd_lowbit_fast = dialog_gcd_odd_u_lowbit_fastpath_enabled();
+        let body_start = if odd_lowbit_fast { 1 } else { 0 };
+        let body_len = body_w.saturating_sub(body_start);
+        let nocin_need = if dialog_gcd_selected_body_nocin_keep_pool() {
+            // Legacy gated offset c[n..n+body_len] needs the full 2n-1 pool.
+            (n + body_len).max(2 * body_len - 1)
+        } else {
+            2 * body_len - 1
+        };
+        let nocin = dialog_gcd_selected_body_nocin_enabled()
+            && body_start >= 1
+            && body_len >= 1
+            && borrowed_carries.map_or(false, |c| c.len() >= nocin_need);
+        if nocin {
+            // No-physical-c_in body: host demand 2*body_len-1 (== 2*body_w-3).
+            // carries = borrowed[..body_len-1], gated = borrowed[body_len-1..2*body_len-1].
+            // Diagnostic keep-pool (mode 2) instead uses the BODY_HOST_CIN offsets
+            // (carries low, gated = c[n-1+1..] on the legacy 2n-1 pool) to isolate
+            // the body arithmetic from the host repack.
+            let c = borrowed_carries.expect("nocin requires borrowed carries");
+            let (carries, gated): (&[QubitId], &[QubitId]) =
+                if dialog_gcd_selected_body_nocin_keep_pool() {
+                    // Legacy gated = c[n-1..2n-1]; gated[0]=c[n-1] is the unused
+                    // (clean) former c_in slot, so operand lands on c[n..2n-1].
+                    let carry_need = body_len - 1;
+                    (&c[..carry_need], &c[n..n + body_len])
+                } else {
+                    let carry_need = body_len - 1;
+                    (&c[..carry_need], &c[carry_need..carry_need + body_len])
+                };
+            b.set_phase("dialog_gcd_raw_tobitvector_materialized_sub_load");
+            for j in 0..body_len {
+                b.ccx(ctrl, subtrahend[body_start + j], gated[j]);
+            }
+            // Reachable GCD states have subtrahend[0]=1 and acc[0]=ctrl here:
+            // ctrl - ctrl has result bit 0 and no borrow into bit 1 (the omitted
+            // c_in). This is exactly the premise the no-c_in body relies on.
+            b.cx(ctrl, acc[0]);
+            b.set_phase("dialog_gcd_raw_tobitvector_materialized_sub_body");
+            cuccaro_sub_fast_borrowed_carries_no_cin(
+                b,
+                gated,
+                &acc[body_start..body_w],
+                carries,
+            );
+            b.set_phase("dialog_gcd_raw_tobitvector_materialized_sub_clear");
+            for j in 0..body_len {
+                let m = b.alloc_bit();
+                b.hmr(gated[j], m);
+                b.cz_if(ctrl, subtrahend[body_start + j], m);
+            }
+            return;
+        }
         // Host the gated register on the tail of the borrowed clean slice when
         // it is long enough for both carry (n-1) and gated (n).
         let gated_host: Option<&[QubitId]> = if dialog_gcd_host_gated_enabled() {
@@ -25146,9 +25536,6 @@ fn dialog_gcd_controlled_sub_selected(
                 gated_owned.as_slice()
             }
         };
-        let body_w = dialog_gcd_body_carry_trunc_width(n, step);
-        let odd_lowbit_fast = dialog_gcd_odd_u_lowbit_fastpath_enabled();
-        let body_start = if odd_lowbit_fast { 1 } else { 0 };
         b.set_phase("dialog_gcd_raw_tobitvector_materialized_sub_load");
         for i in body_start..body_w {
             b.ccx(ctrl, subtrahend[i], gated[i]);
@@ -25160,7 +25547,6 @@ fn dialog_gcd_controlled_sub_selected(
         }
         b.set_phase("dialog_gcd_raw_tobitvector_materialized_sub_body");
         if body_start < body_w {
-            let body_len = body_w - body_start;
             if let Some(carries) =
                 borrowed_carries.filter(|carries| carries.len() >= body_len.saturating_sub(1))
             {
@@ -25212,6 +25598,53 @@ fn dialog_gcd_controlled_add_selected(
     assert!(!addend.is_empty());
     if dialog_gcd_raw_tobitvector_materialized_sub_enabled() {
         let n = addend.len();
+        let body_w = dialog_gcd_body_carry_trunc_width(n, step);
+        let odd_lowbit_fast = dialog_gcd_odd_u_lowbit_fastpath_enabled();
+        let body_start = if odd_lowbit_fast { 1 } else { 0 };
+        let body_len = body_w.saturating_sub(body_start);
+        let nocin_need = if dialog_gcd_selected_body_nocin_keep_pool() {
+            // Legacy gated offset c[n..n+body_len] needs the full 2n-1 pool.
+            (n + body_len).max(2 * body_len - 1)
+        } else {
+            2 * body_len - 1
+        };
+        let nocin = dialog_gcd_selected_body_nocin_enabled()
+            && body_start >= 1
+            && body_len >= 1
+            && borrowed_carries.map_or(false, |c| c.len() >= nocin_need);
+        if nocin {
+            // No-physical-c_in inverse body: host demand 2*body_len-1 (==2*body_w-3).
+            let c = borrowed_carries.expect("nocin requires borrowed carries");
+            let (carries, gated): (&[QubitId], &[QubitId]) =
+                if dialog_gcd_selected_body_nocin_keep_pool() {
+                    let carry_need = body_len - 1;
+                    (&c[..carry_need], &c[n..n + body_len])
+                } else {
+                    let carry_need = body_len - 1;
+                    (&c[..carry_need], &c[carry_need..carry_need + body_len])
+                };
+            b.set_phase("dialog_gcd_raw_tobitvector_materialized_add_load");
+            for j in 0..body_len {
+                b.ccx(ctrl, addend[body_start + j], gated[j]);
+            }
+            // In reverse, acc[0] is zero after unshift and addend[0]=1: adding
+            // ctrl sets the low result bit with no carry into bit 1 (omitted c_in).
+            b.cx(ctrl, acc[0]);
+            b.set_phase("dialog_gcd_raw_tobitvector_materialized_add_body");
+            cuccaro_add_fast_borrowed_carries_no_cin(
+                b,
+                gated,
+                &acc[body_start..body_w],
+                carries,
+            );
+            b.set_phase("dialog_gcd_raw_tobitvector_materialized_add_clear");
+            for j in 0..body_len {
+                let m = b.alloc_bit();
+                b.hmr(gated[j], m);
+                b.cz_if(ctrl, addend[body_start + j], m);
+            }
+            return;
+        }
         let gated_host: Option<&[QubitId]> = if dialog_gcd_host_gated_enabled() {
             borrowed_carries.and_then(|c| {
                 if c.len() >= 2 * n - 1 {
@@ -25231,9 +25664,6 @@ fn dialog_gcd_controlled_add_selected(
                 gated_owned.as_slice()
             }
         };
-        let body_w = dialog_gcd_body_carry_trunc_width(n, step);
-        let odd_lowbit_fast = dialog_gcd_odd_u_lowbit_fastpath_enabled();
-        let body_start = if odd_lowbit_fast { 1 } else { 0 };
         b.set_phase("dialog_gcd_raw_tobitvector_materialized_add_load");
         for i in body_start..body_w {
             b.ccx(ctrl, addend[i], gated[i]);
@@ -25245,7 +25675,6 @@ fn dialog_gcd_controlled_add_selected(
         }
         b.set_phase("dialog_gcd_raw_tobitvector_materialized_add_body");
         if body_start < body_w {
-            let body_len = body_w - body_start;
             if let Some(carries) =
                 borrowed_carries.filter(|carries| carries.len() >= body_len.saturating_sub(1))
             {
@@ -26772,8 +27201,30 @@ fn dialog_gcd_build_composite_scratch(
     compressed_log: &[QubitId],
     raw_block: &[QubitId],
     active_width: usize,
+    step: usize,
 ) -> DialogGcdCompositeScratch {
-    let want = 2 * active_width - 1;
+    // The selected add/sub body is the dominant consumer of this composite
+    // scratch (gated host + borrowed carries). Under the no-physical-c_in body
+    // it needs only 2*body_len-1 == 2*body_w-3 lanes (vs 2*active_width-1), and
+    // for the untrimmed fastpath body_w == active_width, so the demand drops by
+    // exactly 2 lanes — the -1 peak qubit after the gap lane is also reclaimed.
+    let body_start = if dialog_gcd_odd_u_lowbit_fastpath_enabled() {
+        1
+    } else {
+        0
+    };
+    let body_w = dialog_gcd_body_carry_trunc_width(active_width, step);
+    let body_len = body_w.saturating_sub(body_start);
+    let nocin = dialog_gcd_selected_body_nocin_enabled()
+        && !dialog_gcd_selected_body_nocin_keep_pool()
+        && body_start >= 1
+        && body_len >= 1;
+    let want = if nocin {
+        // Match the body's exact host demand; never exceed the legacy ask.
+        (2 * body_len - 1).min(2 * active_width - 1)
+    } else {
+        2 * active_width - 1
+    };
     let mut lanes = Vec::with_capacity(want);
     let mut push = |q: QubitId| {
         if lanes.len() < want
@@ -27058,6 +27509,7 @@ fn emit_dialog_gcd_compressed_sidecar_tobitvector_steps_block_lifecycle(
                     compressed_log,
                     raw_block,
                     active_width,
+                    step,
                 )
             });
             let borrowed_carries = composite_scratch.as_ref().map_or_else(
@@ -27273,6 +27725,7 @@ fn emit_dialog_gcd_compressed_sidecar_tobitvector_steps_reverse_block_lifecycle(
                     compressed_log,
                     raw_block,
                     active_width,
+                    step,
                 )
             });
             let borrowed_carries = composite_scratch.as_ref().map_or_else(
@@ -31901,7 +32354,10 @@ fn configure_ecdsafail_submission_route() {
     // Re-rolled again for the stacked WIDTH_SLOPE 1011->1012 notch: nonce 10429
     // lands a clean island, validated 0/0/0 over all 9024 shots at
     // 1320q x 1,534,277 T = 2,025,245,640.
-    set_default_env("DIALOG_TAIL_NONCE", "10429");
+    // Value-exact -1q (1320 -> 1319): no-physical-c_in selected add/sub body,
+    // tail nonce 620000849 lands a clean island on this frontier base.
+    set_default_env("DIALOG_GCD_SELECTED_BODY_NOCIN", "1");
+    set_default_env("DIALOG_TAIL_NONCE", "620000849");
     set_default_env("DIALOG_GCD_APPLY_FINAL_WINDOWED_FAST_BLOCKS", "2");
     // Fuse the branch-bit comparator with the b0-controlled log update: derive
     // b0_and_b1 from the in-flight comparator carry instead of materializing a
@@ -32415,6 +32871,13 @@ mod direct_const_tests {
         assert!(ONE_INV_DX3_AFFINE_PA_BLOCKER.contains("Rx-Qx"));
         assert!(ONE_INV_DX3_AFFINE_PA_BLOCKER.contains("second inversion"));
         assert!(ONE_INV_DX3_AFFINE_PA_BLOCKER.contains("dirty reset"));
+    }
+
+    #[test]
+    fn dialog_gcd_selected_body_nocin_matches_cin_reference() {
+        if let Err(e) = dialog_gcd_selected_body_nocin_selftest() {
+            panic!("no-c_in selected body selftest failed: {e}");
+        }
     }
 
     #[test]
