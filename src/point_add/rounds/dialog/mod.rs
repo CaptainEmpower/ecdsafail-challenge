@@ -417,6 +417,28 @@ pub(crate) fn dialog_gcd_selected_body_nocin_keep_pool() -> bool {
     std::env::var("DIALOG_GCD_SELECTED_BODY_NOCIN").ok().as_deref() == Some("2")
 }
 
+/// Per-step count of high source bits streamed through the controlled low-q
+/// suffix instead of being materialized. A value of one uses the cheaper
+/// top-bit specialization. Default off when the map is absent.
+pub(crate) fn dialog_gcd_selected_body_stream_suffix_bits(step: usize, body_len: usize) -> usize {
+    let Ok(map) = std::env::var("DIALOG_GCD_SELECTED_BODY_STREAM_SUFFIX_MAP") else {
+        return 0;
+    };
+    map.split(',')
+        .find_map(|entry| {
+            let (entry_step, entry_bits) = entry.trim().split_once(':')?;
+            let entry_step = entry_step.parse::<usize>().ok()?;
+            let entry_bits = entry_bits.parse::<usize>().ok()?;
+            (entry_step == step).then_some(entry_bits)
+        })
+        .unwrap_or(0)
+        .min(body_len.saturating_sub(1))
+}
+
+pub(crate) fn dialog_gcd_selected_body_stream_top_enabled(step: usize, body_len: usize) -> bool {
+    dialog_gcd_selected_body_stream_suffix_bits(step, body_len) == 1
+}
+
 pub(crate) fn dialog_gcd_late_borrow_uv_high_enabled() -> bool {
     std::env::var("DIALOG_GCD_LATE_BORROW_UV_HIGH")
         .ok()
@@ -463,7 +485,17 @@ pub(crate) fn dialog_gcd_controlled_sub_selected(
         let odd_lowbit_fast = dialog_gcd_odd_u_lowbit_fastpath_enabled();
         let body_start = if odd_lowbit_fast { 1 } else { 0 };
         let body_len = body_w.saturating_sub(body_start);
-        let nocin_need = if dialog_gcd_selected_body_nocin_keep_pool() {
+        let stream_suffix = dialog_gcd_selected_body_stream_suffix_bits(step, body_len);
+        let nocin_need = if stream_suffix >= 2
+            && !dialog_gcd_selected_body_nocin_keep_pool()
+        {
+            2 * (body_len - stream_suffix) + 1
+        } else if dialog_gcd_selected_body_stream_top_enabled(step, body_len)
+            && !dialog_gcd_selected_body_nocin_keep_pool()
+            && body_len >= 2
+        {
+            2 * (body_len - 1)
+        } else if dialog_gcd_selected_body_nocin_keep_pool() {
             // Legacy gated offset c[n..n+body_len] needs the full 2n-1 pool.
             (n + body_len).max(2 * body_len - 1)
         } else {
@@ -474,6 +506,61 @@ pub(crate) fn dialog_gcd_controlled_sub_selected(
             && body_len >= 1
             && borrowed_carries.map_or(false, |c| c.len() >= nocin_need);
         if nocin {
+            if stream_suffix >= 2 {
+                let prefix_len = body_len - stream_suffix;
+                let c = borrowed_carries.expect("nocin requires borrowed carries");
+                let (carries, rest) = c.split_at(prefix_len);
+                let (gated, rest) = rest.split_at(prefix_len);
+                let scratch = rest[0];
+                b.set_phase("dialog_gcd_raw_tobitvector_materialized_sub_load");
+                for j in 0..prefix_len {
+                    b.ccx(ctrl, subtrahend[body_start + j], gated[j]);
+                }
+                b.cx(ctrl, acc[0]);
+                b.set_phase("dialog_gcd_raw_tobitvector_materialized_sub_body");
+                cuccaro_sub_fast_prefix_ctrl_suffix_no_cin(
+                    b,
+                    gated,
+                    &subtrahend[body_start + prefix_len..body_w],
+                    &acc[body_start..body_w],
+                    ctrl,
+                    carries,
+                    scratch,
+                );
+                b.set_phase("dialog_gcd_raw_tobitvector_materialized_sub_clear");
+                for j in 0..prefix_len {
+                    let m = b.alloc_bit();
+                    b.hmr(gated[j], m);
+                    b.cz_if(ctrl, subtrahend[body_start + j], m);
+                }
+                return;
+            }
+            if dialog_gcd_selected_body_stream_top_enabled(step, body_len) && body_len >= 2 {
+                let lower_len = body_len - 1;
+                let c = borrowed_carries.expect("nocin requires borrowed carries");
+                let (carries, gated) = c.split_at(lower_len);
+                let gated = &gated[..lower_len];
+                b.set_phase("dialog_gcd_raw_tobitvector_materialized_sub_load");
+                for j in 0..lower_len {
+                    b.ccx(ctrl, subtrahend[body_start + j], gated[j]);
+                }
+                b.cx(ctrl, acc[0]);
+                b.set_phase("dialog_gcd_raw_tobitvector_materialized_sub_body");
+                b.ccx(ctrl, subtrahend[body_w - 1], acc[body_w - 1]);
+                cuccaro_sub_fast_low_to_ext_borrowed_carries_no_cin(
+                    b,
+                    gated,
+                    &acc[body_start..body_w],
+                    carries,
+                );
+                b.set_phase("dialog_gcd_raw_tobitvector_materialized_sub_clear");
+                for j in 0..lower_len {
+                    let m = b.alloc_bit();
+                    b.hmr(gated[j], m);
+                    b.cz_if(ctrl, subtrahend[body_start + j], m);
+                }
+                return;
+            }
             // No-physical-c_in body: host demand 2*body_len-1 (== 2*body_w-3).
             // carries = borrowed[..body_len-1], gated = borrowed[body_len-1..2*body_len-1].
             // Diagnostic keep-pool (mode 2) instead uses the BODY_HOST_CIN offsets
@@ -600,7 +687,17 @@ pub(crate) fn dialog_gcd_controlled_add_selected(
         let odd_lowbit_fast = dialog_gcd_odd_u_lowbit_fastpath_enabled();
         let body_start = if odd_lowbit_fast { 1 } else { 0 };
         let body_len = body_w.saturating_sub(body_start);
-        let nocin_need = if dialog_gcd_selected_body_nocin_keep_pool() {
+        let stream_suffix = dialog_gcd_selected_body_stream_suffix_bits(step, body_len);
+        let nocin_need = if stream_suffix >= 2
+            && !dialog_gcd_selected_body_nocin_keep_pool()
+        {
+            2 * (body_len - stream_suffix) + 1
+        } else if dialog_gcd_selected_body_stream_top_enabled(step, body_len)
+            && !dialog_gcd_selected_body_nocin_keep_pool()
+            && body_len >= 2
+        {
+            2 * (body_len - 1)
+        } else if dialog_gcd_selected_body_nocin_keep_pool() {
             // Legacy gated offset c[n..n+body_len] needs the full 2n-1 pool.
             (n + body_len).max(2 * body_len - 1)
         } else {
@@ -611,6 +708,61 @@ pub(crate) fn dialog_gcd_controlled_add_selected(
             && body_len >= 1
             && borrowed_carries.map_or(false, |c| c.len() >= nocin_need);
         if nocin {
+            if stream_suffix >= 2 {
+                let prefix_len = body_len - stream_suffix;
+                let c = borrowed_carries.expect("nocin requires borrowed carries");
+                let (carries, rest) = c.split_at(prefix_len);
+                let (gated, rest) = rest.split_at(prefix_len);
+                let scratch = rest[0];
+                b.set_phase("dialog_gcd_raw_tobitvector_materialized_add_load");
+                for j in 0..prefix_len {
+                    b.ccx(ctrl, addend[body_start + j], gated[j]);
+                }
+                b.cx(ctrl, acc[0]);
+                b.set_phase("dialog_gcd_raw_tobitvector_materialized_add_body");
+                cuccaro_add_fast_prefix_ctrl_suffix_no_cin(
+                    b,
+                    gated,
+                    &addend[body_start + prefix_len..body_w],
+                    &acc[body_start..body_w],
+                    ctrl,
+                    carries,
+                    scratch,
+                );
+                b.set_phase("dialog_gcd_raw_tobitvector_materialized_add_clear");
+                for j in 0..prefix_len {
+                    let m = b.alloc_bit();
+                    b.hmr(gated[j], m);
+                    b.cz_if(ctrl, addend[body_start + j], m);
+                }
+                return;
+            }
+            if dialog_gcd_selected_body_stream_top_enabled(step, body_len) && body_len >= 2 {
+                let lower_len = body_len - 1;
+                let c = borrowed_carries.expect("nocin requires borrowed carries");
+                let (carries, gated) = c.split_at(lower_len);
+                let gated = &gated[..lower_len];
+                b.set_phase("dialog_gcd_raw_tobitvector_materialized_add_load");
+                for j in 0..lower_len {
+                    b.ccx(ctrl, addend[body_start + j], gated[j]);
+                }
+                b.cx(ctrl, acc[0]);
+                b.set_phase("dialog_gcd_raw_tobitvector_materialized_add_body");
+                cuccaro_add_fast_low_to_ext_borrowed_carries_no_cin(
+                    b,
+                    gated,
+                    &acc[body_start..body_w],
+                    carries,
+                );
+                b.ccx(ctrl, addend[body_w - 1], acc[body_w - 1]);
+                b.set_phase("dialog_gcd_raw_tobitvector_materialized_add_clear");
+                for j in 0..lower_len {
+                    let m = b.alloc_bit();
+                    b.hmr(gated[j], m);
+                    b.cz_if(ctrl, addend[body_start + j], m);
+                }
+                return;
+            }
             // No-physical-c_in inverse body: host demand 2*body_len-1 (==2*body_w-3).
             let c = borrowed_carries.expect("nocin requires borrowed carries");
             let (carries, gated): (&[QubitId], &[QubitId]) =

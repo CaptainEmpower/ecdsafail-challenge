@@ -651,6 +651,91 @@ pub(crate) fn cuccaro_sub_fast_low_to_ext_borrowed_carries_no_cin(
     b.cx(a[0], acc_ext[0]);
 }
 
+/// Add a materialized low prefix and an unmaterialized controlled high suffix.
+/// The prefix's final carry is a valid controlled carry-in for the suffix.
+pub(crate) fn cuccaro_add_fast_prefix_ctrl_suffix_no_cin(
+    b: &mut B,
+    prefix: &[QubitId],
+    suffix: &[QubitId],
+    acc: &[QubitId],
+    ctrl: QubitId,
+    carries: &[QubitId],
+    scratch: QubitId,
+) {
+    let n = prefix.len();
+    assert!(n > 0);
+    assert!(!suffix.is_empty());
+    assert_eq!(acc.len(), n + suffix.len());
+    assert!(carries.len() >= n);
+
+    b.cx(prefix[0], acc[0]);
+    b.ccx(prefix[0], acc[0], carries[0]);
+    b.cx(carries[0], prefix[0]);
+    for i in 1..n {
+        b.cx(prefix[i], acc[i]);
+        b.cx(prefix[i], prefix[i - 1]);
+        b.ccx(prefix[i - 1], acc[i], carries[i]);
+        b.cx(carries[i], prefix[i]);
+    }
+
+    cuccaro_add_ctrl_lowq(b, suffix, &acc[n..], ctrl, prefix[n - 1], scratch);
+
+    for i in (1..n).rev() {
+        b.cx(carries[i], prefix[i]);
+        let m = b.alloc_bit();
+        b.hmr(carries[i], m);
+        b.cz_if(prefix[i - 1], acc[i], m);
+        b.cx(prefix[i], prefix[i - 1]);
+        b.cx(prefix[i - 1], acc[i]);
+    }
+    b.cx(carries[0], prefix[0]);
+    let m0 = b.alloc_bit();
+    b.hmr(carries[0], m0);
+    b.cz_if(prefix[0], acc[0], m0);
+}
+
+/// Inverse of [`cuccaro_add_fast_prefix_ctrl_suffix_no_cin`].
+pub(crate) fn cuccaro_sub_fast_prefix_ctrl_suffix_no_cin(
+    b: &mut B,
+    prefix: &[QubitId],
+    suffix: &[QubitId],
+    acc: &[QubitId],
+    ctrl: QubitId,
+    carries: &[QubitId],
+    scratch: QubitId,
+) {
+    let n = prefix.len();
+    assert!(n > 0);
+    assert!(!suffix.is_empty());
+    assert_eq!(acc.len(), n + suffix.len());
+    assert!(carries.len() >= n);
+
+    b.ccx(prefix[0], acc[0], carries[0]);
+    b.cx(carries[0], prefix[0]);
+    for i in 1..n {
+        b.cx(prefix[i - 1], acc[i]);
+        b.cx(prefix[i], prefix[i - 1]);
+        b.ccx(prefix[i - 1], acc[i], carries[i]);
+        b.cx(carries[i], prefix[i]);
+    }
+
+    cuccaro_sub_ctrl_lowq(b, suffix, &acc[n..], ctrl, prefix[n - 1], scratch);
+
+    for i in (1..n).rev() {
+        b.cx(carries[i], prefix[i]);
+        let m = b.alloc_bit();
+        b.hmr(carries[i], m);
+        b.cz_if(prefix[i - 1], acc[i], m);
+        b.cx(prefix[i], prefix[i - 1]);
+        b.cx(prefix[i], acc[i]);
+    }
+    b.cx(carries[0], prefix[0]);
+    let m0 = b.alloc_bit();
+    b.hmr(carries[0], m0);
+    b.cz_if(prefix[0], acc[0], m0);
+    b.cx(prefix[0], acc[0]);
+}
+
 
 pub(crate) fn cuccaro_add_fast_windowed_low_to_ext(
     b: &mut B,

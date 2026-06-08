@@ -385,7 +385,13 @@ pub(crate) fn dialog_gcd_build_composite_scratch(
         && !dialog_gcd_selected_body_nocin_keep_pool()
         && body_start >= 1
         && body_len >= 1;
-    let want = if nocin {
+    let stream_suffix = dialog_gcd_selected_body_stream_suffix_bits(step, body_len);
+    let want = if nocin && stream_suffix >= 2 {
+        2 * (body_len - stream_suffix) + 1
+    } else if nocin && dialog_gcd_selected_body_stream_top_enabled(step, body_len) && body_len >= 2
+    {
+        2 * (body_len - 1)
+    } else if nocin {
         // Match the body's exact host demand; never exceed the legacy ask.
         (2 * body_len - 1).min(2 * active_width - 1)
     } else {
