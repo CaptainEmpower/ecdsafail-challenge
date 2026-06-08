@@ -1070,6 +1070,36 @@ pub(crate) fn dialog_gcd_chunk_hi(blocks: usize, block: usize, ext_n: usize) -> 
     ((block + 1) * ext_n) / blocks
 }
 
+fn dialog_gcd_conditional_boundary_replay(
+    b: &mut B,
+    u: &[QubitId],
+    v: &[QubitId],
+    ctrl: QubitId,
+    c_in: QubitId,
+    targets: &[(QubitId, usize)],
+) {
+    assert!(!targets.is_empty());
+    assert!(targets.windows(2).all(|w| w[0].1 < w[1].1));
+    for index in (0..targets.len()).rev() {
+        let (target, p) = targets[index];
+        let (start, carry_in) = if index == 0 {
+            (0, c_in)
+        } else {
+            (targets[index - 1].1, targets[index - 1].0)
+        };
+        let phase = b.alloc_bit();
+        b.hmr(target, phase);
+        cmp_lt_phase_conditioned_with_cin(
+            b,
+            &u[start..p],
+            &v[start..p],
+            carry_in,
+            ctrl,
+            phase,
+        );
+    }
+}
+
 pub(crate) fn dialog_gcd_add_ctrl_chunked_low_to_ext(
     b: &mut B,
     source: &[QubitId],
@@ -1170,7 +1200,16 @@ pub(crate) fn dialog_gcd_add_ctrl_chunked_low_to_ext(
                 .iter()
                 .map(|&(cout, p, _)| (cout, p))
                 .collect::<Vec<_>>();
-            if let Some(split) = dialog_gcd_apply_boundary_split() {
+            if dialog_gcd_apply_boundary_conditional_replay_enabled() {
+                dialog_gcd_conditional_boundary_replay(
+                    b,
+                    &acc_ext[..p],
+                    &source[..p],
+                    ctrl,
+                    c_in,
+                    &targets,
+                );
+            } else if let Some(split) = dialog_gcd_apply_boundary_split() {
                 ccx_cmp_lt_into_fast_prefix_targets_split(
                     b,
                     &acc_ext[..p],
@@ -1297,7 +1336,16 @@ pub(crate) fn dialog_gcd_sub_ctrl_chunked_low_to_ext(
                 .iter()
                 .map(|&(bout, p, _)| (bout, p))
                 .collect::<Vec<_>>();
-            if let Some(split) = dialog_gcd_apply_boundary_split() {
+            if dialog_gcd_apply_boundary_conditional_replay_enabled() {
+                dialog_gcd_conditional_boundary_replay(
+                    b,
+                    &source[..p],
+                    &acc_ext[..p],
+                    ctrl,
+                    c_in,
+                    &targets,
+                );
+            } else if let Some(split) = dialog_gcd_apply_boundary_split() {
                 ccx_cmp_lt_into_fast_prefix_targets_split(
                     b,
                     &source[..p],

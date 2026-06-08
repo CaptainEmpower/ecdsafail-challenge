@@ -194,6 +194,13 @@ pub(crate) fn dialog_gcd_apply_boundary_split() -> Option<usize> {
         .filter(|&split| split > 0)
 }
 
+pub(crate) fn dialog_gcd_apply_boundary_conditional_replay_enabled() -> bool {
+    std::env::var("DIALOG_GCD_APPLY_BOUNDARY_CONDITIONAL_REPLAY")
+        .ok()
+        .as_deref()
+        == Some("1")
+}
+
 pub(crate) fn dialog_gcd_apply_replay_swap_host_enabled() -> bool {
     // Prototype, deliberately NOT enabled by configure_ecdsafail_submission_route.
     //

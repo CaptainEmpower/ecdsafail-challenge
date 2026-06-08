@@ -297,6 +297,36 @@ pub(crate) fn cmp_lt_fast_prefix_window_inverse(
     b.cx(u[0], v[0]);
 }
 
+/// Apply the HMR phase correction for one comparator carry. The exact
+/// nonlinear replay is classically conditioned on the HMR result, so its CCX
+/// gates execute on half the shots on average.
+pub(crate) fn cmp_lt_phase_conditioned_with_cin(
+    b: &mut B,
+    u: &[QubitId],
+    v: &[QubitId],
+    c_in: QubitId,
+    ctrl: QubitId,
+    phase: BitId,
+) {
+    let n = u.len();
+    assert_eq!(v.len(), n);
+    assert!(n > 0);
+
+    b.push_condition(phase);
+    for &q in u {
+        b.x(q);
+    }
+    let carries = b.alloc_qubits(n);
+    cmp_lt_fast_prefix_window_forward(b, u, v, c_in, &carries, ctrl, &[]);
+    b.cz(ctrl, u[n - 1]);
+    cmp_lt_fast_prefix_window_inverse(b, u, v, c_in, &carries);
+    b.free_vec(&carries);
+    for &q in u {
+        b.x(q);
+    }
+    b.pop_condition();
+}
+
 pub(crate) fn ccx_cmp_lt_into_fast_prefix_targets_split(
     b: &mut B,
     u: &[QubitId],
