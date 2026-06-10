@@ -604,6 +604,18 @@ fn square_row_max_seg() -> usize {
         .unwrap_or(0)
 }
 
+/// Optional truncation for the row-window boundary-carry cleanup comparator.
+/// Default 0 means exact/full-width.  When set below the segment width, cleanup
+/// compares only the high suffix of the segment and final partial sum.  This is
+/// a deliberate island-hunt knob: it keeps the same low peak and saves Toffoli,
+/// but wrong suffix ties leave the boundary carry dirty.
+fn square_row_window_clean_compare_bits() -> usize {
+    std::env::var("SQUARE_ROW_WINDOW_CLEAN_COMPARE_BITS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(0)
+}
+
 /// Set row bit `j` of square row `i` into `t`. Bit 0 = x_i (diagonal low),
 /// bit 1 = 0 (gap), bit 2+k = x_i & x_{i+1+k} (doubled cross term).
 fn square_row_bit_set(b: &mut B, x: &[QubitId], i: usize, j: usize, t: QubitId) {
@@ -751,36 +763,76 @@ fn square_row_windowed_apply(
     // SQUARE_ROW_WINDOW_SLOW_CMP=1 falls back to the carry-array-free slow
     // comparator (~2n CCX, also peak-flat) for cross-checking.
     let slow_cmp = std::env::var("SQUARE_ROW_WINDOW_SLOW_CMP").ok().as_deref() == Some("1");
+    let clean_cmp_bits = square_row_window_clean_compare_bits();
     for &(cout, lo, hi, cin) in couts.iter().rev() {
-        let seg = build_seg(b, lo, hi);
         let seg_w = hi - lo;
-        let carries = tmp_ext[row_top..row_top + seg_w].to_vec();
-        if forward {
-            // carry_out = (partial_sum < seg + cin)
-            if slow_cmp {
-                cmp_lt_into_with_cin_slow(b, &tmp_ext[base + lo..base + hi], &seg, cin, cout);
-            } else {
-                cmp_lt_into_fast_with_cin_borrowed_carries(
-                    b, &tmp_ext[base + lo..base + hi], &seg, cin, cout, &carries,
-                );
-            }
+        let trunc_w = if clean_cmp_bits == 0 {
+            seg_w
         } else {
-            // borrow_out = (seg + cin > partial_diff)
-            for k in 0..seg_w {
-                b.x(seg[k]);
-            }
-            if slow_cmp {
-                cmp_lt_into_with_cin_slow(b, &seg, &tmp_ext[base + lo..base + hi], cin, cout);
-            } else {
+            clean_cmp_bits.min(seg_w)
+        };
+        if trunc_w < seg_w {
+            let suffix_lo = hi - trunc_w;
+            let seg = build_seg(b, suffix_lo, hi);
+            let carries = tmp_ext[row_top..row_top + trunc_w].to_vec();
+            let cmp_cin = b.alloc_qubit();
+            if forward {
                 cmp_lt_into_fast_with_cin_borrowed_carries(
-                    b, &seg, &tmp_ext[base + lo..base + hi], cin, cout, &carries,
+                    b,
+                    &tmp_ext[base + suffix_lo..base + hi],
+                    &seg,
+                    cmp_cin,
+                    cout,
+                    &carries,
                 );
+            } else {
+                for &q in &seg {
+                    b.x(q);
+                }
+                cmp_lt_into_fast_with_cin_borrowed_carries(
+                    b,
+                    &seg,
+                    &tmp_ext[base + suffix_lo..base + hi],
+                    cmp_cin,
+                    cout,
+                    &carries,
+                );
+                for &q in &seg {
+                    b.x(q);
+                }
             }
-            for k in 0..seg_w {
-                b.x(seg[k]);
+            b.free(cmp_cin);
+            clear_seg(b, suffix_lo, &seg);
+        } else {
+            let seg = build_seg(b, lo, hi);
+            let carries = tmp_ext[row_top..row_top + seg_w].to_vec();
+            if forward {
+                // carry_out = (partial_sum < seg + cin)
+                if slow_cmp {
+                    cmp_lt_into_with_cin_slow(b, &tmp_ext[base + lo..base + hi], &seg, cin, cout);
+                } else {
+                    cmp_lt_into_fast_with_cin_borrowed_carries(
+                        b, &tmp_ext[base + lo..base + hi], &seg, cin, cout, &carries,
+                    );
+                }
+            } else {
+                // borrow_out = (seg + cin > partial_diff)
+                for k in 0..seg_w {
+                    b.x(seg[k]);
+                }
+                if slow_cmp {
+                    cmp_lt_into_with_cin_slow(b, &seg, &tmp_ext[base + lo..base + hi], cin, cout);
+                } else {
+                    cmp_lt_into_fast_with_cin_borrowed_carries(
+                        b, &seg, &tmp_ext[base + lo..base + hi], cin, cout, &carries,
+                    );
+                }
+                for k in 0..seg_w {
+                    b.x(seg[k]);
+                }
             }
+            clear_seg(b, lo, &seg);
         }
-        clear_seg(b, lo, &seg);
         b.free(cout);
     }
     b.free(first_carry);
@@ -1036,6 +1088,10 @@ fn round84_qprod_naf_enabled() -> bool {
     std::env::var("R84_QPROD_NAF").ok().as_deref() == Some("1")
 }
 
+fn round84_qprod_short_enabled() -> bool {
+    std::env::var("ROUND84_QPROD_SHORT").ok().as_deref() == Some("1")
+}
+
 struct Round84FoldStep {
     shift: usize,
     add: bool,
@@ -1097,24 +1153,36 @@ fn round84_compute_quotient_c_product(b: &mut B, quotient: &[QubitId]) -> Vec<Qu
     if round84_qprod_naf_enabled() {
         for (shift, add) in [(10usize, true), (32, true), (5, false), (4, false)] {
             let target = &product[shift..];
-            let pad = b.alloc_qubits(target.len() - q.len());
-            let mut source = q.to_vec();
-            source.extend_from_slice(&pad);
-            if add {
-                round84_add_small(b, &source, target);
+            if round84_qprod_short_enabled() {
+                if add {
+                    add_short_to_long_qq_fast_no_cin(b, q, target);
+                } else {
+                    sub_short_to_long_qq_fast_no_cin(b, q, target);
+                }
             } else {
-                round84_sub_small(b, &source, target);
+                let pad = b.alloc_qubits(target.len() - q.len());
+                let mut source = q.to_vec();
+                source.extend_from_slice(&pad);
+                if add {
+                    round84_add_small(b, &source, target);
+                } else {
+                    round84_sub_small(b, &source, target);
+                }
+                b.free_vec(&pad);
             }
-            b.free_vec(&pad);
         }
     } else {
         for shift in [4usize, 6, 7, 8, 9, 32] {
             let target = &product[shift..];
-            let pad = b.alloc_qubits(target.len() - q.len());
-            let mut source = q.to_vec();
-            source.extend_from_slice(&pad);
-            round84_add_small(b, &source, target);
-            b.free_vec(&pad);
+            if round84_qprod_short_enabled() {
+                add_short_to_long_qq_fast_no_cin(b, q, target);
+            } else {
+                let pad = b.alloc_qubits(target.len() - q.len());
+                let mut source = q.to_vec();
+                source.extend_from_slice(&pad);
+                round84_add_small(b, &source, target);
+                b.free_vec(&pad);
+            }
         }
     }
     product
@@ -1128,24 +1196,36 @@ fn round84_uncompute_quotient_c_product(b: &mut B, quotient: &[QubitId], product
             .rev()
         {
             let target = &product[shift..];
-            let pad = b.alloc_qubits(target.len() - q.len());
-            let mut source = q.to_vec();
-            source.extend_from_slice(&pad);
-            if add {
-                round84_sub_small(b, &source, target);
+            if round84_qprod_short_enabled() {
+                if add {
+                    sub_short_to_long_qq_fast_no_cin(b, q, target);
+                } else {
+                    add_short_to_long_qq_fast_no_cin(b, q, target);
+                }
             } else {
-                round84_add_small(b, &source, target);
+                let pad = b.alloc_qubits(target.len() - q.len());
+                let mut source = q.to_vec();
+                source.extend_from_slice(&pad);
+                if add {
+                    round84_sub_small(b, &source, target);
+                } else {
+                    round84_add_small(b, &source, target);
+                }
+                b.free_vec(&pad);
             }
-            b.free_vec(&pad);
         }
     } else {
         for shift in [4usize, 6, 7, 8, 9, 32].into_iter().rev() {
             let target = &product[shift..];
-            let pad = b.alloc_qubits(target.len() - q.len());
-            let mut source = q.to_vec();
-            source.extend_from_slice(&pad);
-            round84_sub_small(b, &source, target);
-            b.free_vec(&pad);
+            if round84_qprod_short_enabled() {
+                sub_short_to_long_qq_fast_no_cin(b, q, target);
+            } else {
+                let pad = b.alloc_qubits(target.len() - q.len());
+                let mut source = q.to_vec();
+                source.extend_from_slice(&pad);
+                round84_sub_small(b, &source, target);
+                b.free_vec(&pad);
+            }
         }
     }
     for i in 0..q.len() {

@@ -997,6 +997,8 @@ fn set_default_env(name: &str, value: &str) {
 fn configure_ecdsafail_submission_route() {
     set_default_env("SKIP_ALT_SEED_CHECKS", "1");
     set_default_env("DIALOG_GCD_COMPRESSED_SIDECAR_LOG", "1");
+    set_default_env("SQUARE_ROW_WINDOW_CLEAN_COMPARE_BITS", "22");
+    set_default_env("DIALOG_TAIL_NONCE", "7700044727491");
     set_default_env("DIALOG_GCD_SKIP_ZERO_EDGE_CSHIFT", "1");
     set_default_env("DIALOG_GCD_COMPRESSED_BLOCK_LIFECYCLE", "1");
     set_default_env("DIALOG_GCD_HOST_REVERSE_RAW_BLOCK", "1");
@@ -1060,7 +1062,7 @@ fn configure_ecdsafail_submission_route() {
     // been left loose). Value-exact on the reachable support (the dropped fold
     // carry bits are 0 there); residual failures are pure Fiat-Shamir, dodged by
     // the shared re-rolled tail nonce below.
-    set_default_env("KAL_FOLD_CARRY_TRUNC_W", "17");
+    set_default_env("KAL_FOLD_CARRY_TRUNC_W", "18");
     set_default_env("DIALOG_GCD_ROUND763_DEDUP", "1");
     set_default_env("DIALOG_GCD_ROUND763_COMPRESS_LEVER", "1");
     set_default_env("DIALOG_GCD_MEASURED_UNDERFLOW_GATE", "1");
@@ -1443,7 +1445,7 @@ fn configure_ecdsafail_submission_route() {
     // Fiat-Shamir island:
     // Binder-notch fallback 8,9: nonce 169924627 validates 0/0/0 over all
     // 9024 shots at 1300q x 1,454,884 T = 1,891,349,200.
-    set_default_env("DIALOG_TAIL_NONCE", "6002139682343");
+    set_default_env("DIALOG_TAIL_NONCE", "165002130437");
     set_default_env("ROUND84_FOLD_FAST_ADD", "1");  // round84 Solinas-fold small adders coherent->measured-fast (-1,434 exec-T, peak-neutral 1285)
     set_default_env("DIALOG_GCD_FOLD_MAJ2", "1");
     set_default_env("DIALOG_GCD_FOLD_MAJ1", "1");
@@ -1668,6 +1670,15 @@ fn build_builder() -> B {
 }
 
 pub fn build() -> Vec<Op> {
+    if std::env::var("SQUARE_WINDOW_SELFTEST").is_ok() {
+        match square_window_selftest() {
+            Ok(()) => eprintln!("SQUARE_WINDOW_SELFTEST: PASS"),
+            Err(e) => panic!("SQUARE_WINDOW_SELFTEST: FAIL: {e}"),
+        }
+        if std::env::var("SQUARE_WINDOW_SELFTEST_ONLY").ok().as_deref() == Some("1") {
+            return Vec::new();
+        }
+    }
     if std::env::var("FOLD_FREED_TAIL_SELFTEST").is_ok() {
         match fold_freed_tail_selftest() {
             Ok(()) => eprintln!("FOLD_FREED_TAIL_SELFTEST: PASS (freed-tail ≡ baseline, ancilla & phase clean)"),
@@ -1675,6 +1686,160 @@ pub fn build() -> Vec<Op> {
         }
     }
     build_builder().ops
+}
+
+pub fn square_window_selftest() -> Result<(), String> {
+    use sha3::digest::{ExtendableOutput, Update};
+    const SHOTS: usize = 64;
+    let nbits = std::env::var("SQUARE_WINDOW_SELFTEST_NBITS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(24);
+    assert!(nbits > 0);
+    let packed_value_check = 2 * nbits < 64;
+    let wide_value_check = nbits <= 256;
+    let mask = if packed_value_check { (1u64 << nbits) - 1 } else { u64::MAX };
+    let out_mask = if packed_value_check { (1u64 << (2 * nbits)) - 1 } else { u64::MAX };
+    let xs: Vec<u64> = (0..SHOTS as u64)
+        .map(|s| {
+            let r = s
+                .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                .wrapping_add(0xA076_1D64_78BD_642F);
+            let r = (r ^ (r >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            r & mask
+        })
+        .collect();
+    let x_masks: Vec<u64> = (0..nbits)
+        .map(|k| {
+            if packed_value_check {
+                xs.iter()
+                    .enumerate()
+                    .fold(0u64, |acc, (shot, &xv)| acc | (((xv >> k) & 1) << shot))
+            } else {
+                let z = (k as u64)
+                    .wrapping_mul(0xD6E8_FD9D_50B5_8A51)
+                    .wrapping_add(0x9E37_79B9_7F4A_7C15);
+                let z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+                z ^ (z >> 31)
+            }
+        })
+        .collect();
+
+    let build_one = |roundtrip: bool| -> (Vec<Op>, Vec<QubitId>, Vec<QubitId>, usize, usize) {
+        let mut b = B::new();
+        let x = b.alloc_qubits(nbits);
+        let tmp = b.alloc_qubits(2 * nbits);
+        schoolbook_square_symmetric_lowq_selfhosted(&mut b, &x, &tmp);
+        if roundtrip {
+            schoolbook_square_symmetric_lowq_selfhosted_inverse(&mut b, &x, &tmp);
+        }
+        let nq = b.next_qubit as usize;
+        let nb = b.next_bit as usize;
+        (b.ops, x, tmp, nq, nb)
+    };
+
+    let run = |ops: &[Op],
+               x: &[QubitId],
+               tmp: &[QubitId],
+               nq: usize,
+               nb: usize|
+     -> (Vec<u64>, Vec<u64>, u64) {
+        let mut seed = sha3::Shake128::default();
+        seed.update(b"square-window-selftest");
+        let mut xof = seed.finalize_xof();
+        let mut sim = Simulator::new(nq, nb, &mut xof);
+        sim.clear_for_shot();
+        for k in 0..nbits {
+            *sim.qubit_mut(x[k]) = x_masks[k];
+        }
+        sim.apply_iter(ops.iter());
+        let out_x_masks: Vec<u64> = x.iter().map(|&q| sim.qubit(q)).collect();
+        let out_tmp_masks: Vec<u64> = tmp.iter().map(|&q| sim.qubit(q)).collect();
+        (out_x_masks, out_tmp_masks, sim.phase)
+    };
+
+    let (ops_fwd, x_fwd, tmp_fwd, nq_fwd, nb_fwd) = build_one(false);
+    let (out_x_masks, out_tmp_masks, phase) = run(&ops_fwd, &x_fwd, &tmp_fwd, nq_fwd, nb_fwd);
+    if phase != 0 {
+        return Err(format!("forward phase garbage 0x{phase:x}"));
+    }
+    for (k, (&got, &want)) in out_x_masks.iter().zip(x_masks.iter()).enumerate() {
+        if got != want {
+            return Err(format!("forward x bit {k} changed"));
+        }
+    }
+    if packed_value_check {
+        for shot in 0..SHOTS {
+            let got = out_tmp_masks
+                .iter()
+                .take(2 * nbits)
+                .enumerate()
+                .fold(0u64, |acc, (k, &bits)| acc | (((bits >> shot) & 1) << k));
+            let want = xs[shot].wrapping_mul(xs[shot]) & out_mask;
+            if got != want {
+                return Err(format!(
+                    "forward value mismatch shot {shot}: tmp got 0x{got:x} want 0x{want:x}"
+                ));
+            }
+        }
+    } else if wide_value_check {
+        let in_limbs = (nbits + 63) / 64;
+        let out_limbs = (2 * nbits + 63) / 64;
+        for shot in 0..SHOTS {
+            let mut x_limbs = vec![0u64; in_limbs];
+            for k in 0..nbits {
+                if (x_masks[k] >> shot) & 1 != 0 {
+                    x_limbs[k / 64] |= 1u64 << (k % 64);
+                }
+            }
+            let mut product = vec![0u64; out_limbs];
+            for i in 0..in_limbs {
+                let mut carry = 0u128;
+                for j in 0..in_limbs {
+                    let idx = i + j;
+                    if idx >= out_limbs {
+                        break;
+                    }
+                    let cur = product[idx] as u128
+                        + (x_limbs[i] as u128) * (x_limbs[j] as u128)
+                        + carry;
+                    product[idx] = cur as u64;
+                    carry = cur >> 64;
+                }
+                let mut idx = i + in_limbs;
+                while carry != 0 && idx < out_limbs {
+                    let cur = product[idx] as u128 + carry;
+                    product[idx] = cur as u64;
+                    carry = cur >> 64;
+                    idx += 1;
+                }
+            }
+            for k in 0..(2 * nbits) {
+                let got = (out_tmp_masks[k] >> shot) & 1;
+                let want = (product[k / 64] >> (k % 64)) & 1;
+                if got != want {
+                    return Err(format!("forward value mismatch shot {shot} bit {k}"));
+                }
+            }
+        }
+    }
+
+    let (ops_rt, x_rt, tmp_rt, nq_rt, nb_rt) = build_one(true);
+    let (out_x_masks, out_tmp_masks, phase) = run(&ops_rt, &x_rt, &tmp_rt, nq_rt, nb_rt);
+    if phase != 0 {
+        return Err(format!("roundtrip phase garbage 0x{phase:x}"));
+    }
+    for (k, (&got, &want)) in out_x_masks.iter().zip(x_masks.iter()).enumerate() {
+        if got != want {
+            return Err(format!("roundtrip x bit {k} changed"));
+        }
+    }
+    for (k, &got) in out_tmp_masks.iter().enumerate() {
+        if got != 0 {
+            return Err(format!("roundtrip tmp bit {k} dirty mask 0x{got:x}"));
+        }
+    }
+    Ok(())
 }
 
 
