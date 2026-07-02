@@ -137,15 +137,23 @@ circuit (one point addition):
   arithmetic). Reaction-limited runtime = 10.77 s (vs the 13.6 s sequential
   upper bound), giving a **spacetime volume ≈ 3.6×10⁷ physical-qubit-seconds**
   at d=27.
-- **Full ECDLP extrapolation (derived, `analysis/ecdlp_estimate.py`):** the
-  ladder factor is now **derived structurally**, not hand-picked — basic
-  double-and-add is `2(n+1) = 514` controlled additions (n=256), so
-  **514 × 1.36M ≈ 7.0×10⁸ Toffoli** (T-count ≈ 2.8×10⁹ @ 4 T/Toffoli), with a
-  composed toffoli-depth ≈ 5.5×10⁸ (accumulator serializes the additions).
-  Windowing lowers the count (w=4 → ~1.8×10⁸, w=8 → ~9.0×10⁷ Toffoli). This sits
-  just below Gidney–Ekerå's RSA-2048 estimate (~3×10⁹), the expected ordering.
-  The earlier ~1,600-addition / ~2.2×10⁹ figure was a placeholder multiplier and
-  overestimated by ~3×.
+- **This circuit vs the source paper's published bounds** (Babbush et al. 2026,
+  arXiv:2603.28846v2, `docs/`). The paper zero-knowledge-proves two *point-addition*
+  circuits: Low-Qubit (≤ 2.7M Toffoli, ≤ 1,175 qubits, ≤ 17M ops) and Low-Gate
+  (≤ 2.1M Toffoli, ≤ 1,425 qubits, ≤ 17M ops). This repo's **measured** point
+  addition — **1,364,230 Toffoli · 1,152 qubits · 10.2M ops** — is under the
+  Low-Qubit bound on **all three axes**. That is the precise meaning of "beats the
+  frontier": it is an improved instance of the paper's own primitive.
+- **Full ECDLP extrapolation (paper's closed form, `analysis/ecdlp_estimate.py`):**
+  the paper's Appendix A gives `ECDLP_Toff = (PA_Toff + 3·2^w)(2n/w − 4)` and
+  `ECDLP_Qubits = PA_Qubits + w`, optimal window **w=16** → `2n/w − 4 = 28`
+  windowed point additions. Substituting this repo's measured PA gives
+  **(1.36M + 3·2¹⁶)·28 ≈ 43.7M Toffoli at 1,168 qubits**, reaction-limited to
+  **~5 minutes** — roughly **2.06× fewer Toffoli** than the paper's published
+  Low-Qubit ECDLP (≤ 90M) and 1.60× fewer than Low-Gate (≤ 70M), because the
+  improved PA propagates through the ladder. (My earlier `2(n+1)=514` /
+  `~7×10⁸` figure used the wrong ladder model and a `2^w` lookup; the paper's
+  `28`-addition / `3·2^w`-lookup form supersedes it.)
 
 **Key limitations this surfaces** (all real, all worth fixing):
 - The scored "qubits" is `max_id + 1` (total allocated ids), **not peak
@@ -156,10 +164,12 @@ circuit (one point addition):
   `depth_report` now measure toffoli-depth and gate-depth (critical path over
   read/write hazards), feeding measured runtime and spacetime volume into the
   cost model.
-- The full-attack ladder factor is now derived (`2(n+1)`), but the register-file
-  width and adder completeness (exceptional cases: P==Q, P==−Q, ∞) remain
-  assumptions pending a full-circuit build; only the per-addition figures are
-  measured.
+- The full-attack ladder cost now uses the source paper's exact closed form
+  (`(PA+3·2^w)(2n/w−4)`, w=16), but adder completeness (exceptional cases: P==Q,
+  P==−Q, ∞) and the classical-vs-quantum-addend gap (this repo's PA folds a
+  compile-time classical addend; the windowed ladder loads P[k] from a quantum
+  table) remain assumptions pending a full-circuit build; only the per-addition
+  figures are measured.
 
 ---
 
