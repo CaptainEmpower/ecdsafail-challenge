@@ -68,6 +68,9 @@ use crate::weierstrass_elliptic_curve::WeierstrassEllipticCurve;
 
 pub mod venting;
 
+#[cfg(test)]
+mod completeness_probe;
+
 mod emit;
 pub(crate) use emit::*;
 
