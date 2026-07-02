@@ -81,8 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install pinned toolchain + components
-        run: |
-          rustup toolchain install 1.93.0 --profile minimal --component rustfmt clippy
+        run: rustup toolchain install 1.93.0 --profile minimal -c rustfmt -c clippy
       - uses: Swatinem/rust-cache@v2
       - name: rustfmt
         run: cargo fmt --all --check
