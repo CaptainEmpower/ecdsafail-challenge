@@ -26,7 +26,10 @@ fn toffoli_count<'a>(ops: impl Iterator<Item = &'a crate::circuit::Op>) -> u64 {
         .count() as u64
 }
 
+// Heavy: builds the full point-add circuit and re-scans the op stream for k=2..4.
+// Opt-in so it never slows the default `cargo test`; run with `--ignored`.
 #[test]
+#[ignore = "heavy measurement harness; run explicitly with `cargo test -- --ignored`"]
 fn ladder_composition_is_additive_flat_width_serial_depth() {
     let ops = build();
 
