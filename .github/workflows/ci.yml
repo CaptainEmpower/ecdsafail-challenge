@@ -1,0 +1,90 @@
+name: CI
+
+# Relevant checks for this repo:
+#   - build-and-test : the Rust crate compiles (locked) and the unit tests pass.
+#   - verify         : the full challenge pipeline — build the circuit, SCORE it
+#                      over the harness' shots (correctness / reversibility /
+#                      phase), measure depth, then run the analysis/ scientific
+#                      suite (z3 proofs + cost model + the completeness checks).
+#   - lint           : rustfmt + clippy, informational (never blocks).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    name: build + unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # rust-toolchain (channel 1.93.0) is honored automatically by cargo.
+      - name: Install pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (locked)
+        run: cargo build --release --locked --bins
+      - name: Unit tests
+        # Heavy end-to-end probes are #[ignore]'d, so the default run is quick.
+        run: cargo test --release --locked
+
+  verify:
+    name: score + analysis suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        run: rustup toolchain install 1.93.0 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - name: Install z3 Python bindings (for the analysis proofs)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-z3
+      - name: Fetch crates (so the offline benchmark build succeeds)
+        run: cargo fetch --locked
+      - name: Build + score the circuit (benchmark.sh -> ops.bin, score.json)
+        # No bubblewrap in CI -> benchmark.sh takes its documented unconfined
+        # fallback. Scoring is done by the trusted eval_circuit either way, so
+        # the score is authoritative regardless of the sandbox.
+        env:
+          RUSTUP_TOOLCHAIN: "1.93.0"
+        run: bash benchmark.sh
+      - name: Measure circuit depth (depth_report -> depth.json)
+        run: cargo run --release --locked --bin depth_report
+      - name: Run the scientific-rigor suite (analysis/run.sh)
+        run: bash analysis/run.sh
+      - name: Upload score + depth artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: score-and-depth
+          path: |
+            score.json
+            depth.json
+          if-no-files-found: ignore
+
+  lint:
+    name: fmt + clippy (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Never block: the repo tracks one intentional #[cfg(kani)] cfg warning and
+    # formatting is not yet enforced. Surfaced as annotations, not failures.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain + components
+        run: |
+          rustup toolchain install 1.93.0 --profile minimal --component rustfmt clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --all-targets --locked
