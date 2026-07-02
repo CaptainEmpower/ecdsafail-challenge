@@ -109,7 +109,10 @@ fn run_case(
     agg
 }
 
+// Heavy: builds the full circuit and simulates it across 16 seeds × 3 cases.
+// Opt-in so it never slows the default `cargo test`; run with `--ignored`.
 #[test]
+#[ignore = "heavy gating probe; run explicitly with `cargo test -- --ignored`"]
 fn completeness_probe_exceptional_inputs() {
     let c = secp256k1();
     let g = (c.gx, c.gy);
