@@ -263,6 +263,7 @@ pub(crate) fn schoolbook_mul_into_addsub_lowq_inverse(
 ///
 /// Row i layout (width n-i): bit 0 = diagonal x[i] at position 2i, bit 1 = 0
 /// (gap), bit k+2 = cross-product (x[i] AND x[i+1+k]) at position i+(i+1+k)+1.
+#[allow(dead_code)] // retained reference/alternative impl; not on active build path
 pub(crate) fn schoolbook_square_symmetric(b: &mut B, x: &[QubitId], tmp_ext: &[QubitId]) {
     let n = x.len();
     debug_assert_eq!(tmp_ext.len(), 2 * n);
@@ -296,6 +297,7 @@ pub(crate) fn schoolbook_square_symmetric(b: &mut B, x: &[QubitId], tmp_ext: &[Q
     }
 }
 
+#[allow(dead_code)] // retained reference/alternative impl; not on active build path
 pub(crate) fn schoolbook_square_symmetric_lowq(b: &mut B, x: &[QubitId], tmp_ext: &[QubitId]) {
     let n = x.len();
     debug_assert_eq!(tmp_ext.len(), 2 * n);
@@ -330,6 +332,7 @@ pub(crate) fn schoolbook_square_symmetric_lowq(b: &mut B, x: &[QubitId], tmp_ext
 /// (returned clean) instead of a fresh allocation. Toffoli-identical to the
 /// fast square, peak-identical to the lowq square — used for the z0 lobe of the
 /// round84 Karatsuba square, where the not-yet-written z2 slice is clean scratch.
+#[allow(dead_code)] // retained reference/alternative impl; not on active build path
 pub(crate) fn schoolbook_square_symmetric_hosted(
     b: &mut B,
     x: &[QubitId],
@@ -632,7 +635,7 @@ fn square_row_windowed_apply(
     // allocated carry array. The interior carry-out cleanup uses the *slow*
     // (carry-array-free) comparator, so cleanup is peak-flat (+0 beyond seg).
     let row_top = base + width + 1; // first clean tmp_ext cell above the row.
-    let borrow_lane = |b: &mut B, _need: usize| -> Vec<QubitId> {
+    let borrow_lane = |_b: &mut B, _need: usize| -> Vec<QubitId> {
         // Always available: tmp_ext beyond row_top is clean and >= seg_w wide
         // for every window (seg_w <= width and the high tail is wide enough).
         tmp_ext[row_top..row_top + _need].to_vec()
@@ -645,7 +648,6 @@ fn square_row_windowed_apply(
     for (wi, &(lo, hi)) in bounds.iter().enumerate() {
         let last = wi == nwin - 1;
         let seg = build_seg(b, lo, hi);
-        let seg_w = hi - lo;
         // Build a_block = seg ++ 0pad, acc_block = tmp[lo..hi] ++ high, n = seg_w+1.
         let pad = b.alloc_qubit();
         let mut a_block = seg.clone();
@@ -987,12 +989,14 @@ pub(crate) fn schoolbook_square_symmetric_lowq_selfhosted_inverse_with_clean_sup
     }
 }
 
+#[allow(dead_code)] // retained reference/alternative impl; not on active build path
 struct Round84FoldStep {
     shift: usize,
     add: bool,
     wrap: QubitId,
 }
 
+#[allow(dead_code)] // retained reference/alternative impl; not on active build path
 struct Round84AggregateFold {
     steps: Vec<Round84FoldStep>,
     quotient: Vec<QubitId>,
