@@ -68,6 +68,9 @@ use crate::weierstrass_elliptic_curve::WeierstrassEllipticCurve;
 
 pub mod venting;
 
+#[cfg(test)]
+mod ladder_composition;
+
 mod emit;
 pub(crate) use emit::*;
 
