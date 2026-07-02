@@ -1,7 +1,20 @@
 # ADR 0006 — Approach to adder completeness (cost estimate → verified attack)
 
-**Status:** Accepted (strategy); the A-vs-B path choice is gated by an experiment
+**Status:** Accepted; gating experiment run — **Path A viable, conditioned on structurally removing the ∞-accumulator**
 **Date:** 2026-07-02
+
+> **Experiment result (2026-07-02, `src/point_add/completeness_probe.rs`, 16 seeds).**
+> All three exceptional inputs (dx=0 doubling, dx=0 P=−Q, ∞ accumulator) share one
+> signature: **ancilla always return to |0⟩ (16/16)**, output is **always wrong
+> (0/16)**, and the global **phase is corrupted on a large fraction of RNG draws**
+> (clean only 7–12/16) — probabilistic phase garbage from uncorrected HMR/R
+> kickback (the kickmix "misused MBUC" mode). So exceptions are **Shor-sensitive
+> (phase, not just output)**, but they do **not** leak the ancilla / break
+> reversibility structurally. Verdict: **Path A is viable** — the negligibility
+> argument must bound exceptional *amplitude* (phase errors at amplitude ε
+> contribute ~ε to failure, within Shor's tolerance), and the **∞-accumulator
+> (amplitude 1 at t=0) must be structurally removed** (paper's first-window direct
+> lookup), since it cannot be left to negligibility. Path B remains the fallback.
 
 ## Context
 
