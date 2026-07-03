@@ -7,7 +7,7 @@
 //!
 //! Complements `analysis/verify/*.py` (z3): z3 proves the width-256 arithmetic
 //! over abstract bitvectors; Kani proves the exact Rust control flow of the
-//! Solinas reduction (`mod_add_qq`, src/point_add/arith/modular.rs:12-49) using
+//! Solinas reduction (`mod_add_qq`, src/point_add/arith/modular/add.rs) using
 //! the real `alloy_primitives::U256` type.
 //!
 //! Run:  cargo kani --harness solinas_add_u64

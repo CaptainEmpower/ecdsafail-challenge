@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Formal (z3/SMT) proof that the Solinas modular-reduction algorithm used by
-`mod_add_qq` (src/point_add/arith/modular.rs:12-49) computes (acc + a) mod p
+`mod_add_qq` (src/point_add/arith/modular/add.rs) computes (acc + a) mod p
 for ALL acc, a in [0, p) on the secp256k1 field -- and that its overflow ancilla
 (`flag`) uncomputes to |0>, i.e. the sub-circuit is clean/reversible.
 
