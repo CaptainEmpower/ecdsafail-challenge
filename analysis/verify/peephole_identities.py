@@ -105,7 +105,11 @@ def prove_adder(w):
     return prove(f"ripple-carry recurrence == (a+b) mod 2^{w}", setup)
 
 
-for w in (1, 2, 3, 4, 8, 16, 32, 64):
+# Small widths exercise the recurrence shape; 256/257 are the PRODUCTION widths
+# (256-bit coordinate registers and the 257-bit Solinas extended register), so
+# the adder is proved AT the width the scored circuit runs, not extrapolated to
+# it. z3 discharges each in <0.2 s (ripple structure bit-blasts cheaply).
+for w in (1, 2, 3, 4, 8, 16, 32, 64, 256, 257):
     prove_adder(w)
 
 print("\n== Less-than comparator via borrow chain (comparator.rs) ==")
@@ -128,7 +132,8 @@ def prove_cmp(w):
     return prove(f"borrow-chain flag == (a <_u b), width {w}", setup)
 
 
-for w in (1, 2, 3, 4, 8, 16, 32, 64):
+# Same rationale as the adder: 256/257 are the production comparator widths.
+for w in (1, 2, 3, 4, 8, 16, 32, 64, 256, 257):
     prove_cmp(w)
 
 # ---- summary ----

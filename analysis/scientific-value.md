@@ -93,7 +93,7 @@ rather than sampled.
 ### 1b. Peephole, adder, and comparator invariants
 
 `peephole_identities.py` proves the boolean claims behind the gate-level
-optimizations (`22/22 lemmas PROVED`):
+optimizations (`26/26 lemmas PROVED`):
 
 | Claim | Source | Theorem |
 |---|---|---|
@@ -103,8 +103,13 @@ optimizations (`22/22 lemmas PROVED`):
 | FoldEqualCtrls | `constprop.rs` | `a=b ⇒ CCX(a,b,t)=t⊕a` |
 | DropComplementCtrls | `constprop.rs` | `a=¬b ⇒ CCX(a,b,t)=t` |
 | InversePairCancellation | `constprop.rs` | `CCX;CCX (controls/target unchanged) = I` |
-| Ripple-carry recurrence | `venting.rs`, `arith/adder.rs` | carry chain `= (a+b) mod 2^w`, w∈{1..64} |
-| Borrow-chain comparator | `comparator.rs` | final borrow `= (a <ᵤ b)`, w∈{1..64} |
+| Ripple-carry recurrence | `venting.rs`, `arith/adder.rs` | carry chain `= (a+b) mod 2^w`, w∈{1..64, **256, 257**} |
+| Borrow-chain comparator | `comparator.rs` | final borrow `= (a <ᵤ b)`, w∈{1..64, **256, 257**} |
+
+The `256`/`257` widths are the **production** register sizes (256-bit
+coordinates; the 257-bit Solinas extended register), so the adder and comparator
+recurrences are proved *at* the width the scored circuit runs — not extrapolated
+from ≤64-bit instances (referee finding F3, [ADR 0024](adr/0024-z3-production-width-adder-proof.md)).
 
 The affine-form analysis in `constprop.rs` (`FoldEqualCtrls`/`DropComplement`)
 proves two controls are *always* equal/opposite over GF(2); the z3 lemma
