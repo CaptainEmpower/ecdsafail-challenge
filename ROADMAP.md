@@ -79,6 +79,13 @@ detail lives in the ADR trail (`analysis/adr/`, index at
 - **Reproducible analysis env** — uv-managed, hash-pinned
   ([#51](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/51)); build
   warnings addressed ([#7](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/7)).
+- **Reusable proof toolkit** ([#70](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/70),
+  ADR 0028 scope + ADR 0029 build): the verification *methodology* — the
+  generalized z3 `src/sim.rs` op-stream replayer — extracted from ADR 0027 into
+  `analysis/verify/proof_toolkit/` (`just toolkit` self-test), with
+  `mbuc_phase_correction.py` refactored onto it byte-identical. The
+  score-specialized primitives are deliberately **not** carved out (ADR 0028); a
+  clean-room primitive crate stays deferred until a second consumer exists.
 
 ---
 

@@ -42,8 +42,8 @@ test:
 
 # ── analysis: scientific-rigor suite (z3 proofs + cost model) ───────────────
 
-# Full 14-stage analysis suite (formal proofs + physical cost model).
-analysis: solinas peephole mbuc refadders controlled-lookup lookup-cost completeness direct-lookup offset mid-ladder recover toyshor cost-model ecdlp
+# Full 15-stage analysis suite (formal proofs + physical cost model).
+analysis: toolkit solinas peephole mbuc refadders controlled-lookup lookup-cost completeness direct-lookup offset mid-ladder recover toyshor cost-model ecdlp
 
 # Byte-compile all analysis python — catches version-incompatible syntax. To
 # reproduce CI's 3.11-floor guard exactly, pass a 3.11 interpreter:
@@ -54,6 +54,12 @@ pycheck:
 # Kani (bit-precise BMC) harnesses on the real Rust alloy U256 type.
 kani:
     cd analysis && bash verify/run_kani.sh
+
+# Reusable proof toolkit self-test: the generalized z3 sim.rs op-stream replayer
+# that the mbuc proof (and future op-stream proofs) drive (ADR 0028/0029).
+toolkit:
+    @echo "### proof_toolkit self-test: symbolic sim.rs op-stream replayer (z3, ADR 0028/0029) ###"
+    cd analysis/verify && {{PYTHON}} -m proof_toolkit.selftest
 
 solinas:
     @echo "### Solinas modular-reduction proof (z3) ###"
