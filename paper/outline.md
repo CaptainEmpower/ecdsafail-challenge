@@ -41,9 +41,11 @@ point-addition bounds — and the whole pipeline is byte-reproducible.
 ## 2. Background & related work
 - Shor-ECDLP, windowed double-and-add, the affine chord/tangent addition and its
   four exceptional branches.
-- Prior estimates: Roetteler et al. 2017; Babbush et al. 2026 (ZK-validated,
-  Fiat–Shamir fuzz); Chevignard et al. 2026 (space-optimized EEA inversion).
-  Position this work as *orthogonal rigor*, not a competing algorithm.
+- Prior estimates: Roetteler et al. 2017; Babbush et al. 2026 (arXiv:2603.28846 —
+  ZK proof *of resource costs*, Fiat–Shamir fuzz); Han Luo et al. 2026
+  (arXiv:2604.02311 — Proos–Zalka EEA inversion, 1333 q); Chevignard et al. 2026
+  (ePrint 2026/280 — space-optimized inversion, 1098 q). Position this work as
+  *orthogonal rigor*, not a competing algorithm.
 
 ## 3. The optimized point-addition circuit (case study)
 - Architecture: kickmix reversible model; Cuccaro adders; division-free **Solinas**
@@ -111,7 +113,11 @@ point-addition bounds — and the whole pipeline is byte-reproducible.
   parameters. C. Full metric tables. D. Reproduction commands.
 
 ## Open TODO before submission
-- [ ] Full-text diff vs Babbush App. A (fuzz vs proof) and Chevignard (exceptions).
+- [x] Full-text diff vs Babbush App. A (fuzz vs proof) and the space-optimized
+      papers (exceptions) — done: Babbush's ZK is *of resource costs* over a ≥99%
+      fuzz sample with no completeness/point-at-infinity treatment; neither Han Luo
+      (2604.02311) nor Chevignard (2026/280) machine-checks or handles exceptions.
+      Items 1–2 hold and sharpen. See `novelty-assessment.md`.
 - [ ] Decide authorship / competition-attribution / disclosure posture.
 - [ ] Independent third-party reproduction of the byte-identical build + numbers.
 - [ ] Tighten the physical cost model (currently a coarse upper bound above the
