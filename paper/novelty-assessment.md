@@ -43,10 +43,15 @@ area with multiple 2026 results:
    (c) a **reversible circuit** that detects the exceptional set on real `(x,y)`
    coordinates and is shown to match the scalar/dlog predicate on the whole group
    of several toy curves; (d) an offset-window encoding that removes the dominant
-   zero-window ∞ term structurally. Nearly all prior work stops at (a-as-argument):
-   Babbush's full text never mentions the point at infinity or a complete formula
-   (the ~1% of exceptional/incorrect runs are simply absorbed by Shor's tolerance),
-   and neither space-optimized paper treats the exceptional cases explicitly.
+   zero-window ∞ term structurally; and (e) a **demonstrated recovery** — the full
+   two-register Shor-ECDLP, run by exact statevector simulation on toy prime-order
+   curves *with the incomplete adder + this handling*, **recovers the secret discrete
+   log**, and the offset encoding is shown load-bearing for the *recovery* (dropping
+   it collapses it), not only for the amplitude figure (ADR 0019). Nearly all prior
+   work stops at (a-as-argument): Babbush's full text never mentions the point at
+   infinity or a complete formula (the ~1% of exceptional/incorrect runs are simply
+   absorbed by Shor's tolerance), and neither space-optimized paper treats the
+   exceptional cases explicitly — let alone demonstrates a completeness-aware run.
 
 3. **Emitted-and-measured full-ladder cost, not only a closed form.** The full
    28-window ladder Toffoli/depth/peak are stream-emitted and counted (no
@@ -72,8 +77,13 @@ area with multiple 2026 results:
   guarantee*, not *smallest*.
 - **Toffoli×qubits is a competition metric**, not a physical cost; the defensible
   framing is the spacetime/cost-model mapping.
-- **No demonstrated end-to-end attack** — a verified primitive + derived/measured
-  ladder + a completeness argument, not a run.
+- **No demonstrated end-to-end attack *at scale*.** The full Shor-ECDLP pipeline
+  *is* now demonstrated to **recover the discrete log** — but at **toy scale** (exact
+  statevector simulation on prime-order curves of order 19/29/41, using the incomplete
+  affine adder + offset/direct-lookup handling; `shor_ecdlp_recovery.py`, ADR 0019).
+  The 256-bit attack remains a *derived/measured cost estimate*, not a run — the toy
+  demonstration + closed-form scale-up of the exceptional rate is the honest bridge,
+  not an executed 256-bit break.
 
 ## Does this add value to cryptanalysis?
 
