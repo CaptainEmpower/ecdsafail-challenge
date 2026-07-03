@@ -38,7 +38,13 @@ use crate::sim::Simulator;
 
 // ── classical reference ─────────────────────────────────────────────────────
 
-fn fmul(a: u64, b: u64, p: u64) -> u64 {
+pub(super) fn fadd(a: u64, b: u64, p: u64) -> u64 {
+    (a + b) % p
+}
+pub(super) fn fsub(a: u64, b: u64, p: u64) -> u64 {
+    (a + p - b % p) % p
+}
+pub(super) fn fmul(a: u64, b: u64, p: u64) -> u64 {
     (a * b) % p
 }
 fn fpow(mut a: u64, mut e: u64, p: u64) -> u64 {
@@ -55,7 +61,7 @@ fn fpow(mut a: u64, mut e: u64, p: u64) -> u64 {
 }
 /// Field inverse via Fermat (`p` prime); `finv(0)=0` by convention (the reversible
 /// circuit's defined behaviour on the exceptional input).
-fn finv(a: u64, p: u64) -> u64 {
+pub(super) fn finv(a: u64, p: u64) -> u64 {
     if a.is_multiple_of(p) {
         0
     } else {
@@ -64,7 +70,7 @@ fn finv(a: u64, p: u64) -> u64 {
 }
 
 /// Smallest register width holding `[0, p)`: `2^(n-1) <= p < 2^n`, so `p < 2^n`.
-fn width_for(p: u64) -> usize {
+pub(super) fn width_for(p: u64) -> usize {
     (64 - p.leading_zeros()) as usize
 }
 
@@ -72,7 +78,7 @@ fn width_for(p: u64) -> usize {
 
 /// Re-emit a captured `X`/`CX`/`CCX`-only fragment into `circ`, forward or reversed
 /// (reversed order inverts it, since each gate is its own inverse).
-fn replay(circ: &mut B, ops: &[Op], reverse: bool) {
+pub(super) fn replay(circ: &mut B, ops: &[Op], reverse: bool) {
     let apply = |circ: &mut B, op: &Op| match op.kind {
         OperationType::X => circ.x(op.q_target),
         OperationType::CX => circ.cx(op.q_control1, op.q_target),
@@ -114,14 +120,14 @@ fn emit_gadget(circ: &mut B, out: &[QubitId], build: impl FnOnce(&mut B) -> Vec<
 
 // ── shared modular-add scratch (each mod_add returns it to |0>) ──────────────
 
-struct Anc {
+pub(super) struct Anc {
     hi: QubitId,
     flag: QubitId,
     carry: QubitId,
     preg: Vec<QubitId>,
 }
 impl Anc {
-    fn alloc(circ: &mut B, n: usize) -> Self {
+    pub(super) fn alloc(circ: &mut B, n: usize) -> Self {
         Anc {
             hi: circ.alloc_qubits(1)[0],
             flag: circ.alloc_qubits(1)[0],
@@ -129,14 +135,24 @@ impl Anc {
             preg: circ.alloc_qubits(n),
         }
     }
-    fn add(&self, circ: &mut B, addend: &[QubitId], acc: &[QubitId], p: u64) {
+    pub(super) fn add(&self, circ: &mut B, addend: &[QubitId], acc: &[QubitId], p: u64) {
         mod_add(
             circ, addend, acc, p, self.hi, self.flag, &self.preg, self.carry,
         );
     }
+    /// `acc := (acc - addend) mod p`, `addend` preserved — the exact inverse of
+    /// `add` (re-emit its ops reversed). Nesting-safe (no `take_ops`); direct
+    /// `circ.ops` access is available to this child module of `point_add`.
+    pub(super) fn sub(&self, circ: &mut B, addend: &[QubitId], acc: &[QubitId], p: u64) {
+        let start = circ.ops.len();
+        self.add(circ, addend, acc, p);
+        let frag: Vec<Op> = circ.ops[start..].to_vec();
+        circ.ops.truncate(start);
+        replay(circ, &frag, true);
+    }
 }
 
-fn copy_reg(circ: &mut B, src: &[QubitId], dst: &[QubitId]) {
+pub(super) fn copy_reg(circ: &mut B, src: &[QubitId], dst: &[QubitId]) {
     assert_eq!(src.len(), dst.len(), "copy_reg width mismatch");
     for (s, d) in src.iter().zip(dst) {
         circ.cx(*s, *d);
@@ -147,7 +163,7 @@ fn copy_reg(circ: &mut B, src: &[QubitId], dst: &[QubitId]) {
 
 /// `z := (x·y) mod p` in a fresh |0> register (returned); `x`, `y` preserved; all
 /// other scratch left dirty (an outer reverse cleans it). `p < 2^n`, `x,y < p`.
-fn mod_mul_fwd(
+pub(super) fn mod_mul_fwd(
     circ: &mut B,
     x: &[QubitId],
     y: &[QubitId],
@@ -184,7 +200,13 @@ fn mod_mul_fwd(
 /// `res := a^{p-2} mod p` (= `a^{-1}` for `a != 0`, `0` for `a = 0`) in a fresh
 /// register (returned); `a` preserved; scratch dirty. Left-to-right binary
 /// exponentiation over the classical exponent `e = p-2`.
-fn mod_inv_fwd(circ: &mut B, a: &[QubitId], p: u64, n: usize, anc: &Anc) -> Vec<QubitId> {
+pub(super) fn mod_inv_fwd(
+    circ: &mut B,
+    a: &[QubitId],
+    p: u64,
+    n: usize,
+    anc: &Anc,
+) -> Vec<QubitId> {
     assert_eq!(a.len(), n, "mod_inv_fwd: a width != n");
     let e = p - 2;
     assert!(e >= 1, "toy field needs p >= 3");
