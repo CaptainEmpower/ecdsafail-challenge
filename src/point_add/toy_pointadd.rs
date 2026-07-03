@@ -429,3 +429,12 @@ fn toy_point_add_handles_all_exceptional_cases() {
         "  => the affine adder is COMPLETE on real toy curves — Path B handled, not just detected."
     );
 }
+
+// ── capstone link (issue #55, ADR 0022): gate-level ladder [a]P+[b]Q ─────────
+//
+// The gate-level-ladder provenance test lives in `toy_shor.rs` (issue #55 compliance
+// checklist path), declared here as a child module so it reuses this module's
+// `#[cfg(test)]` point-add internals (`emit_point_add`, `load_const`, `read_reg`, the
+// classical `Pt`/`ToyCurve`/`ec_*` reference) without widening their visibility.
+#[path = "toy_shor.rs"]
+mod toy_shor;
