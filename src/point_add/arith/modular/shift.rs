@@ -209,7 +209,7 @@ mod tests {
     };
 
     /// `mod_shift_left_by_k`: `v := (v · 2^k) mod p` in the low register; the
-    /// returned `(spill, ovf, flag_inv)` are the reduction byproducts the caller
+    /// returned `(spill, flag_inv, ovf)` are the reduction byproducts the caller
     /// manages (uncomputed by `mod_shift_right_by_k`). Value-checked on `v` over 64
     /// random `x < p`; all scratch EXCEPT `v` and the returned registers is clean.
     #[test]
@@ -218,7 +218,7 @@ mod tests {
         const K: usize = 3;
         let mut b = B::new();
         let v = b.alloc_qubits(256);
-        let (spill, ovf, flag_inv) = mod_shift_left_by_k(&mut b, &v, p, K);
+        let (spill, flag_inv, ovf) = mod_shift_left_by_k(&mut b, &v, p, K);
         let nq = b.next_qubit as usize;
         let nb = b.next_bit as usize;
         let outputs: std::collections::HashSet<u64> = v

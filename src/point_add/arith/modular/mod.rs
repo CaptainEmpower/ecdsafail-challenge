@@ -5,6 +5,7 @@
 use super::*;
 
 mod add;
+mod add_fast;
 mod scale;
 mod shift;
 mod sub;
@@ -12,6 +13,7 @@ mod sub;
 mod test_util;
 
 pub(crate) use add::*;
+pub(crate) use add_fast::*;
 pub(crate) use scale::*;
 pub(crate) use shift::*;
 pub(crate) use sub::*;

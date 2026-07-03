@@ -44,7 +44,7 @@ discharge the underlying claims as **theorems over all inputs** (z3 returns
 
 ### 1a. Solinas modular reduction — the load-bearing arithmetic identity
 
-`mod_add_qq` (`src/point_add/arith/modular.rs:12-49`) computes `(acc + a) mod p`
+`mod_add_qq` (`src/point_add/arith/modular/add.rs`) computes `(acc + a) mod p`
 on `p = 2^256 − 2^32 − 977` using the Solinas trick: add, add `c = 2^256 − p`,
 branch on the overflow bit, conditionally undo. The comment asserts this "saves
 one full (n+1)-wide Cuccaro" but never proves it. `solinas_reduction.py` models
@@ -428,7 +428,7 @@ were verified (`venting.rs:1,311`, `mod.rs:709,21`, `gcd.rs`).
   in §1b.
 
 ### Curve/harness-specific (still instructive, less portable)
-- **Solinas folding** (`arith/modular.rs`, verified in §1a) — exploits the sparse
+- **Solinas folding** (`arith/modular/add.rs`, verified in §1a) — exploits the sparse
   `c = 2^32 + 977`; bespoke per Solinas prime, not general.
 - **Fused double / controlled-double and symmetric square-subtract**
   (`trailmix_ludicrous/fused.rs`, `ec_add.rs`) — amortize shared folds/carries;

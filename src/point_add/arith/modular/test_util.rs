@@ -42,3 +42,37 @@ pub(super) fn get256<R: XofReader>(sim: &Simulator<'_, R>, qs: &[QubitId], s: us
     }
     v
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::point_add::SECP256K1_P;
+
+    /// The shared helpers are self-consistent: `rand_lt_p` stays in `[0, p)` and
+    /// `set256`/`get256` round-trip a value bit-exactly on a lane.
+    #[test]
+    fn helpers_are_self_consistent() {
+        for seed in 0..32u64 {
+            assert!(rand_lt_p(seed) < SECP256K1_P, "rand_lt_p returned >= p");
+        }
+        let mut b = B::new();
+        let reg = b.alloc_qubits(256);
+        let nq = b.next_qubit as usize;
+        let nb = b.next_bit as usize;
+        let mut seed = sha3::Shake128::default();
+        sha3::digest::Update::update(&mut seed, b"test_util-roundtrip");
+        let mut xof = sha3::digest::ExtendableOutput::finalize_xof(seed);
+        let mut sim = Simulator::new(nq, nb, &mut xof);
+        let vals: Vec<U256> = (0..64).map(|s| rand_lt_p(s as u64 + 1)).collect();
+        for (s, &v) in vals.iter().enumerate() {
+            set256(&mut sim, &reg, v, s);
+        }
+        for (s, &v) in vals.iter().enumerate() {
+            assert_eq!(
+                get256(&sim, &reg, s),
+                v,
+                "set256/get256 round-trip failed, lane {s}"
+            );
+        }
+    }
+}
