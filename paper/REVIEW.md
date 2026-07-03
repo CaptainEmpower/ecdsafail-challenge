@@ -45,7 +45,7 @@ The ECDLP's hardness is untouched and the docs are correct that there is no brea
 - **z3 integer-level Solinas proof.** `analysis/verify/solinas_reduction.py`
   genuinely proves `mod_add_qq: low256 == (acc+a) mod p` and the overflow-ancilla
   uncompute, over all `acc,a ∈ [0,p)`, against the real secp256k1
-  `p = 2²⁵⁶−2³²−977`. Faithful step-for-step to `arith/modular/add.rs:9-46`.
+  `p = 2²⁵⁶−2³²−977`. Faithful step-for-step to `src/point_add/arith/modular/add.rs:9-46`.
 - **All three external citations are real,** and `validate_reference_adders.py`
   genuinely rejects the source paper's negative-control circuits.
 - **The numeric pipeline is internally consistent** and reproduces, including the
