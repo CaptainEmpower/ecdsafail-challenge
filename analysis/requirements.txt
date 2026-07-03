@@ -1,0 +1,4 @@
+# Pinned dependencies for the analysis/ scientific-rigor suite (just analysis).
+# CI installs these on the pinned Python 3.11 floor; pin exact versions so the
+# validation environment is reproducible across runs.
+z3-solver==4.16.0

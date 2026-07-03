@@ -195,7 +195,7 @@ def main():
         detected = fails > 0
         status = f"rejected ({fails} bad shots)" if detected else "NOT DETECTED -- validator too weak!"
         all_ok &= detected
-        print(f"  [{'ok' if detected else 'XX'}] {name:<52} {"neg":<16} -> {status}")
+        print(f"  [{'ok' if detected else 'XX'}] {name:<52} {'neg':<16} -> {status}")
 
     print("\n" + "=" * 74)
     if all_ok:
