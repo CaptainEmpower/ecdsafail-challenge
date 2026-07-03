@@ -33,6 +33,11 @@ test:
 # Full 11-stage analysis suite (formal proofs + physical cost model).
 analysis: solinas peephole refadders controlled-lookup lookup-cost completeness direct-lookup offset mid-ladder cost-model ecdlp
 
+# Byte-compile all analysis python — catches version-incompatible syntax on the
+# 3.11 floor (run under python3.11 to reproduce CI's guard).
+pycheck:
+    python3 -m compileall -q analysis
+
 # Kani (bit-precise BMC) harnesses on the real Rust alloy U256 type.
 kani:
     cd analysis && bash verify/run_kani.sh

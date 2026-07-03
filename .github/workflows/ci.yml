@@ -61,8 +61,18 @@ jobs:
       - name: Install pinned toolchain
         run: rustup toolchain install 1.93.0 --profile minimal
       - uses: Swatinem/rust-cache@v2
-      - name: Install z3 Python bindings (for the analysis proofs)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-z3
+      # Pin Python to the declared 3.11 floor (the analysis suite is kept runnable
+      # on 3.11+; a floating runner default is how a 3.12-only f-string once slipped
+      # through). z3 comes from pip (z3-solver) so it binds to THIS interpreter, not
+      # the apt system python.
+      - name: Pin Python to the 3.11 floor
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install z3 for the analysis proofs
+        run: pip install z3-solver
+      - name: Guard — all analysis python compiles on the 3.11 floor
+        run: python -m compileall -q analysis
       - name: Fetch crates (so the offline benchmark build succeeds)
         run: cargo fetch --locked
       - name: Build + score the circuit (benchmark.sh -> ops.bin, score.json)
