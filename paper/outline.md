@@ -47,7 +47,8 @@ point-addition bounds — and the whole pipeline is byte-reproducible.
 - Prior estimates: Roetteler et al. 2017; Babbush et al. 2026 (arXiv:2603.28846 —
   ZK proof *of resource costs*, Fiat–Shamir fuzz); Han Luo et al. 2026
   (arXiv:2604.02311 — Proos–Zalka EEA inversion, 1333 q); Chevignard et al. 2026
-  (ePrint 2026/280 — space-optimized inversion, 1098 q). Position this work as
+  (ePrint 2026/280 — space-optimized inversion, 1193 q for P-256; 1098 q is P-224).
+  Position this work as
   *orthogonal rigor*, not a competing algorithm.
 
 ## 3. The optimized point-addition circuit (case study)

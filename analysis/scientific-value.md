@@ -36,8 +36,8 @@ Sections 1–2 supply exactly those two missing pieces.
 Two senses of "cryptanalysis" pull apart here, and the honest answer differs:
 
 - **Cryptanalysis as *breaking* — no contribution.** There is no new attack, no
-  reduced qubit/gate frontier (the primitive is `1152` q; the frontier is
-  Chevignard's `1098` and dropping), and no structural weakness exposed in
+  reduced qubit/gate frontier (the primitive is `1152` q; the P-256 frontier is
+  Chevignard's `1193` — their `1098` is P-224 — and dropping), and no structural weakness exposed in
   secp256k1. The hardness of the ECDLP is untouched; ECDSA is exactly as safe as
   before.
 - **Cryptanalysis as *resource estimation / threat assessment* — a narrow but real
@@ -356,10 +356,14 @@ circuit (one point addition):
   end-to-end.
 
 **Key limitations this surfaces** (all real, all worth fixing):
-- The scored "qubits" is `max_id + 1` (total allocated ids), **not peak
-  simultaneous width** — the README's "peak qubits" is inaccurate
-  (`circuit.rs:356`). A metric that rewarded true peak width would better track
-  physical qubit count.
+- The scored "qubits" is `max_id + 1` (highest allocated id + 1, `circuit.rs:356`).
+  This *equals* peak simultaneous width **because the builder reuses freed qubit
+  ids** — the `ladder_composition` test measures peak flat at 1152 (Δ=0) across
+  chained additions, i.e. ancilla ids are recycled, so `max_id+1` tracks the true
+  peak rather than the running total. So the README's "peak qubits" label is
+  accurate for this circuit (referee finding F8). The residual caveat is only
+  structural: `max_id+1` would *over-count* (not under-count) for a builder that
+  never recycled ids, so it is a conservative proxy, never an optimistic one.
 - ~~No depth / T-depth is tracked~~ **RESOLVED**: `circuit::analyze_depth` +
   `depth_report` now measure toffoli-depth and gate-depth (critical path over
   read/write hazards), feeding measured runtime and spacetime volume into the
