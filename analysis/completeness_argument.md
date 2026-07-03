@@ -68,8 +68,9 @@ negligible.
 > superposition is now **done**: [ADR 0016](adr/0016-exact-mid-ladder-bound.md)
 > computes it exactly and [ADR 0018](adr/0018-circuit-level-exceptional-detection.md)
 > confirms the exceptional predicate at the circuit level over real coordinates
-> (the Tier B ladder [#4] and the quantum-addend testbed [#27] this needed have
-> both landed).
+> (the Tier B ladder [#4](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/4)
+> and the quantum-addend testbed [#27](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/27)
+> this needed have both landed).
 
 > **The zero-window ∞ term is removed by an offset encoding** (issue #5 part (b),
 > [ADR 0015](adr/0015-offset-window-encoding.md)). The exact measurement
@@ -136,10 +137,11 @@ literature. This is what justifies `completeness_overhead = 1.0` in
   (or invoke a specific ladder ordering that provably avoids `{M,−M}`), as
   Roetteler et al. discuss. That assumption has since been removed on two fronts:
   [ADR 0008](adr/0008-empirical-completeness-collision-rate.md) /
-  `completeness_collision_rate.py` measured the rate exactly and found it is
+  `verify/completeness_collision_rate.py` measured the rate exactly and found it is
   `O(1)·2/n` and **insensitive to the accumulator's shape** (holding even 250× from
   uniform), because the addend sweeps the group; and
-  [ADR 0016](adr/0016-exact-mid-ladder-bound.md) / `mid_ladder_bound.py` computes the
+  [ADR 0016](adr/0016-exact-mid-ladder-bound.md) / `verify/mid_ladder_bound.py`
+  computes the
   **exact** end-to-end amplitude by tracking the real clean-mass distribution — no
   equidistribution assumption at all. What remains at 256-bit attack scale is only
   that an exact convolution is infeasible, so the reported number is the analytic
