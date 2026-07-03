@@ -42,7 +42,8 @@ fn fmul(a: u64, b: u64, p: u64) -> u64 {
     (a * b) % p
 }
 fn fpow(mut a: u64, mut e: u64, p: u64) -> u64 {
-    let (mut r, _) = (1u64, a %= p);
+    a %= p;
+    let mut r = 1u64;
     while e > 0 {
         if e & 1 == 1 {
             r = fmul(r, a, p);
@@ -55,7 +56,7 @@ fn fpow(mut a: u64, mut e: u64, p: u64) -> u64 {
 /// Field inverse via Fermat (`p` prime); `finv(0)=0` by convention (the reversible
 /// circuit's defined behaviour on the exceptional input).
 fn finv(a: u64, p: u64) -> u64 {
-    if a % p == 0 {
+    if a.is_multiple_of(p) {
         0
     } else {
         fpow(a, p - 2, p)
@@ -125,7 +126,9 @@ impl Anc {
         }
     }
     fn add(&self, circ: &mut B, addend: &[QubitId], acc: &[QubitId], p: u64) {
-        mod_add(circ, addend, acc, p, self.hi, self.flag, &self.preg, self.carry);
+        mod_add(
+            circ, addend, acc, p, self.hi, self.flag, &self.preg, self.carry,
+        );
     }
 }
 
@@ -139,7 +142,14 @@ fn copy_reg(circ: &mut B, src: &[QubitId], dst: &[QubitId]) {
 
 /// `z := (x·y) mod p` in a fresh |0> register (returned); `x`, `y` preserved; all
 /// other scratch left dirty (an outer reverse cleans it). `p < 2^n`, `x,y < p`.
-fn mod_mul_fwd(circ: &mut B, x: &[QubitId], y: &[QubitId], p: u64, n: usize, anc: &Anc) -> Vec<QubitId> {
+fn mod_mul_fwd(
+    circ: &mut B,
+    x: &[QubitId],
+    y: &[QubitId],
+    p: u64,
+    n: usize,
+    anc: &Anc,
+) -> Vec<QubitId> {
     let z = circ.alloc_qubits(n);
     // doubling chain: t[0] = y, t[i] = 2·t[i-1] mod p.
     let mut t: Vec<Vec<QubitId>> = Vec::with_capacity(n);
@@ -185,7 +195,14 @@ fn mod_inv_fwd(circ: &mut B, a: &[QubitId], p: u64, n: usize, anc: &Anc) -> Vec<
 // ── composable clean gadgets (used by ADR 0021's point-add) ──────────────────
 
 /// `out ^= (x·y) mod p`; `out` |0>, `x`,`y` preserved, all scratch |0>.
-pub(super) fn emit_mod_mul(circ: &mut B, x: &[QubitId], y: &[QubitId], out: &[QubitId], p: u64, n: usize) {
+pub(super) fn emit_mod_mul(
+    circ: &mut B,
+    x: &[QubitId],
+    y: &[QubitId],
+    out: &[QubitId],
+    p: u64,
+    n: usize,
+) {
     emit_gadget(circ, out, |c| {
         let anc = Anc::alloc(c, n);
         mod_mul_fwd(c, x, y, p, n, &anc)
@@ -211,7 +228,11 @@ fn read_reg<R: sha3::digest::XofReader>(sim: &Simulator<'_, R>, reg: &[QubitId],
 }
 
 /// Assert every qubit except those in `keep` reads 0 in every shot (scratch clean).
-fn assert_scratch_clean<R: sha3::digest::XofReader>(sim: &Simulator<'_, R>, n_qubits: usize, keep: &[QubitId]) {
+fn assert_scratch_clean<R: sha3::digest::XofReader>(
+    sim: &Simulator<'_, R>,
+    n_qubits: usize,
+    keep: &[QubitId],
+) {
     for id in 0..n_qubits as u64 {
         if keep.contains(&QubitId(id)) {
             continue;
@@ -261,14 +282,20 @@ fn toy_mod_mul_is_field_multiply() {
             sim.apply_iter(ops.iter());
             for s in 0..shots {
                 let xv = s as u64;
-                assert_eq!(read_reg(&sim, &out, s), fmul(xv, yval, p), "x*y mod p wrong (p={p}, x={xv}, y={yval})");
+                assert_eq!(
+                    read_reg(&sim, &out, s),
+                    fmul(xv, yval, p),
+                    "x*y mod p wrong (p={p}, x={xv}, y={yval})"
+                );
                 assert_eq!(read_reg(&sim, &x, s), xv, "x perturbed");
                 assert_eq!(read_reg(&sim, &y, s), yval, "y perturbed");
             }
             let keep: Vec<QubitId> = x.iter().chain(&y).chain(&out).copied().collect();
             assert_scratch_clean(&sim, peak as usize, &keep);
         }
-        eprintln!("  p={p:<2} (n={n}): out=(x·y) mod p exact over F_p, x/y preserved, scratch clean");
+        eprintln!(
+            "  p={p:<2} (n={n}): out=(x·y) mod p exact over F_p, x/y preserved, scratch clean"
+        );
     }
     eprintln!("  => reversible modular multiply verified.");
 }
