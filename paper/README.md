@@ -12,6 +12,7 @@ executed 256-bit attack, and not the qubit frontier).
 | [`novelty-assessment.md`](novelty-assessment.md) | Honest **full-text** diff vs the 2026 literature (Babbush arXiv:2603.28846 / Han Luo arXiv:2604.02311 / Chevignard ePrint 2026/280 / Roetteler) — what is genuinely new (machine-checked arithmetic + computed/verified completeness + reproducibility) and what is not (no new algorithm, not smallest qubit count). Decides the framing. |
 | [`outline.md`](outline.md) | Section-by-section paper outline using the *methods/verified-artifact* framing, with explicit non-claims and a pre-submission TODO. |
 | [`technical-report.md`](technical-report.md) | A citable standalone technical report (abstract, measured result tables, contributions, reproduction commands, honest limitations, how-to-cite). The lower-risk artifact if a full preprint isn't pursued. |
+| [`REVIEW.md`](REVIEW.md) | Independent skeptical referee review of the codebase and its claims — reproduces the score + proofs, then ranks findings F1–F8 (framing scope + citation accuracy). Input to [ADR 0023](../analysis/adr/0023-external-referee-review.md); remediation in ADR 0024/0025/0026. |
 
 ## Recommendation (see `novelty-assessment.md`)
 
