@@ -63,9 +63,13 @@ negligible.
 > `w = 0`** (ancilla clean, phase `+1`; a `ctrl=0` negative control leaves it at
 > ∞). So the adder is never fed the amplitude-1 ∞ start; the only residual is the
 > `w=0` zero-window term (issue #5 part (b)) — and that term is now removed
-> *structurally* by the offset window encoding below, not merely bounded. A full
-> end-to-end check of the *mid-ladder* residual over the real 28-window
-> two-scalar superposition still needs the Tier B ladder ([issue #4](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/4)).
+> *structurally* by the offset window encoding below, not merely bounded. The
+> end-to-end check of the *mid-ladder* residual over the real 28-window two-scalar
+> superposition is now **done**: [ADR 0016](adr/0016-exact-mid-ladder-bound.md)
+> computes it exactly and [ADR 0018](adr/0018-circuit-level-exceptional-detection.md)
+> confirms the exceptional predicate at the circuit level over real coordinates
+> (the Tier B ladder [#4] and the quantum-addend testbed [#27] this needed have
+> both landed).
 
 > **The zero-window ∞ term is removed by an offset encoding** (issue #5 part (b),
 > [ADR 0015](adr/0015-offset-window-encoding.md)). The exact measurement
@@ -125,12 +129,22 @@ literature. This is what justifies `completeness_overhead = 1.0` in
 
 ## Caveats (what keeps this an argument, not a proof)
 
-- **Equidistribution is heuristic.** The `~1/n` collision rate assumes the
-  accumulator's x-coordinate is approximately uniform over the superposition. A
-  rigorous proof would bound the actual distribution of partial-scalar multiples
+- **Equidistribution is no longer load-bearing.** The `~1/n` per-addition rate was
+  originally justified by assuming the accumulator's x-coordinate is approximately
+  uniform over the superposition. A rigorous treatment would bound the actual
+  distribution of partial-scalar multiples
   (or invoke a specific ladder ordering that provably avoids `{M,−M}`), as
-  Roetteler et al. discuss. The 240-bit margin is large enough that even a very
-  non-uniform distribution stays negligible, but this is not machine-checked.
+  Roetteler et al. discuss. That assumption has since been removed on two fronts:
+  [ADR 0008](adr/0008-empirical-completeness-collision-rate.md) /
+  `completeness_collision_rate.py` measured the rate exactly and found it is
+  `O(1)·2/n` and **insensitive to the accumulator's shape** (holding even 250× from
+  uniform), because the addend sweeps the group; and
+  [ADR 0016](adr/0016-exact-mid-ladder-bound.md) / `mid_ladder_bound.py` computes the
+  **exact** end-to-end amplitude by tracking the real clean-mass distribution — no
+  equidistribution assumption at all. What remains at 256-bit attack scale is only
+  that an exact convolution is infeasible, so the reported number is the analytic
+  **union upper bound** (`P[⋃ A_k] ≤ Σ_k P[A_k]`), which the toy `exact ≤ union`
+  results certify is tight, not loose.
 
   > **The scalar/dlog model behind this bound is now confirmed at the circuit level
   > over real coordinate arithmetic** (issue #28, [ADR 0018](adr/0018-circuit-level-exceptional-detection.md)).
@@ -140,21 +154,28 @@ literature. This is what justifies `completeness_overhead = 1.0` in
   > `src/point_add/ec_exceptional.rs` builds a **reversible** exceptional detector —
   > `dx0 = (x1==x2)`, with `acc=∞` / `addend=∞` as `∞`-sentinel zero-tests, on real
   > `(x,y)` coordinate qubits (no modular inverse) — and simulation-measures it over
-  > **every** `(accumulator, addend)` pair of a real prime-order toy curve
-  > (`y²=x³+2x+2 / F₁₇`, `n=19`). The measured real-coordinate verdict equals the
-  > scalar predicate `(m==0) ∨ (y==0) ∨ (y≡±m)` on all `19²` pairs (0 mismatches),
+  > **every** `(accumulator, addend)` pair of **three** real prime-order toy curves
+  > (orders 19/29/41, e.g. `y²=x³+2x+2 / F₁₇`) across window widths `w = 2..5`. The
+  > measured real-coordinate verdict equals the scalar predicate
+  > `(m==0) ∨ (y==0) ∨ (y≡±m)` on every pair (0 mismatches),
   > driving the ADR 0016 survival recursion with the *circuit-measured* predicate
   > reproduces the scalar-model end-to-end residual (`exact ≤ union`), and the offset
   > encoding emits `addend=∞` **never** on real coordinates. So the equivalence this
   > bound rests on is no longer only a dlog assumption (nor only a Python
   > cross-check): it is confirmed by a reversible circuit over real coordinate
-  > arithmetic, exhaustively over the group. This does not remove the
-  > equidistribution heuristic (the *rate* still assumes near-uniformity), but it
-  > removes any doubt that `dx=0` on real coordinates is exactly the `{M,−M}` set.
-- **The ∞-removal depends on the ladder using direct-lookup initialisation.**
-  This repo builds one addition, not the ladder; §3 relies on the paper's
-  structure. Confirming it requires the Tier B ladder build ([issue #4](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/4)),
-  which is where this fix lands.
+  > arithmetic, exhaustively over the group — removing any doubt that `dx=0` on real
+  > coordinates is exactly the `{M,−M}` set that the exact bound (ADR 0016) and the
+  > shape-insensitive rate (ADR 0008) are built on.
+- **The ∞-removal is circuit-demonstrated, not only structural.** The amplitude-1
+  ∞ start is removed by the direct-lookup first window
+  ([ADR 0009](adr/0009-direct-lookup-init.md) / `direct_lookup_init.py`), built as an
+  actual reversible circuit and verified exhaustively on a toy prime-order curve plus
+  a secp256k1 256-bit spot-check; the zero-window ∞ is removed by the offset window
+  encoding ([ADR 0015](adr/0015-offset-window-encoding.md)). The Tier B ladder
+  ([#4](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/4)) and the
+  quantum-addend testbed ([#27](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/27))
+  this once depended on have both landed (`ladder_full.rs`, `ladder_stream.rs`), so
+  the end-to-end structure is now exercised, not only cited from the paper.
 - **Phase, not just value.** §2 shows exceptions also corrupt phase; the bound in
   §4 covers this because a mis-phased state at amplitude ε contributes ≤ ε to the
   failure probability, exactly as a wrong-value state does.
