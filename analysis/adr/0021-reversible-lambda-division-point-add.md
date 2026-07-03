@@ -1,10 +1,9 @@
 # ADR 0021 — Reversible λ-division affine point-add with exceptional handling (Path B, toy scale, issue #48)
 
-**Status:** Proposed — *scoping only, not yet implemented.* Records the design and
-rationale for the deferred Path B increment (handle, not just detect, the exceptional
-cases), so it is captured without committing to the build. Depends on
-[ADR 0020](0020-reversible-toy-modular-inverse.md). Promote to **Accepted** when
-implemented.
+**Status:** Accepted — implemented in `src/point_add/toy_pointadd.rs` (`#[cfg(test)]`),
+on the ADR 0020 field arithmetic. Verified exhaustively over every `(P,Q)` pair of
+prime-order toy curves of order 19/29/41. Depends on
+[ADR 0020](0020-reversible-toy-modular-inverse.md).
 **Date:** 2026-07-03
 
 ## Context
@@ -52,7 +51,27 @@ scored secp256k1 circuit):
    pieces (arithmetic proofs, QROM lookup, quantum-addend add, detector, and now a
    complete point-add). Explicitly out of scope for this ADR.
 
-## Consequences (anticipated)
+## As built
+
+Implemented as one *compute → copy → reverse* gadget (every op `X`/`CX`/`CCX`, so the
+forward fragment re-emitted reversed uncomputes all scratch — the ADR 0020 pattern):
+
+- **Forward:** ∞ flags via the ADR 0018 zero-tests (`P=∞ ⇔ (x1,y1)=(0,0)`, likewise
+  `Q`); `dx=x2−x1`, `dy=y2−y1`, `sy=y1+y2`; `eqx`, `dbl=(P==Q)`, `neg=(P==−Q)`; the
+  slope numerator/denominator as chord `(dy,dx)` **plus** the tangent `(3x1²+a, 2y1)`
+  gated on `dbl` (for a true double `dx=dy=0`, so the gated add yields exactly the
+  tangent); `λ = num · inv(den)` (ADR 0020 `mod_inv`+`mod_mul`); `x3=λ²−x1−x2`,
+  `y3=λ(x1−x3)−y1`. The generic denominator is never 0; `inv(0)=0` keeps the overridden
+  ∞/neg branches from dividing by zero.
+- **Copy (mux):** mutually-exclusive controls `c_pinf`/`c_qinf`/`c_gen` select
+  `Q` / `P` / `(x3,y3)` into the clean output; `P=−Q` selects nothing → `(0,0)=∞`.
+- **Verification:** exhaustive over **every** `(P,Q)` pair of three real prime-order
+  toy curves — `y²=x³+2x+2/F₁₇` (order 19, 361 pairs, 73 exceptional),
+  `x³+x+4/F₂₃` (order 29, 841 / 113), `x³+x+3/F₃₁` (order 41, 1681 / 161). Every result
+  equals the reference group law (chord, tangent, and all ∞/−P branches), inputs
+  preserved, all scratch `|0⟩`, phase `+1`.
+
+## Consequences
 
 - **Closes the "detect vs handle" gap at the circuit level.** Path A's detector
   (ADR 0018) becomes a *complete adder*; the exceptional inputs are eliminated in the
@@ -65,5 +84,7 @@ scored secp256k1 circuit):
   (ADR 0006 stands).
 - **Marginal value is modest, effort is high.** Arithmetic is machine-checked (z3+Kani),
   the exceptional set is detected (ADR 0018), and recovery is demonstrated (ADR 0019);
-  this adds gate-level *handling*, valuable but not load-bearing. Gated behind ADR 0020.
-  Priority: after the paper writeup + uv migration. Remains Proposed until built.
+  this adds gate-level *handling*, valuable but not load-bearing. Built on ADR 0020.
+- **Done.** The affine adder is **complete** on real toy curves — the Path-B "handle,
+  not just detect/bound" increment delivered. The fully gate-level toy Shor run (item 4
+  above) remains a further stretch, out of scope here.

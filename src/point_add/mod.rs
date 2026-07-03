@@ -82,6 +82,8 @@ mod ladder_stream;
 mod qaddend_testbed;
 #[cfg(test)]
 mod toy_field;
+#[cfg(test)]
+mod toy_pointadd;
 
 mod emit;
 pub(crate) use emit::*;
