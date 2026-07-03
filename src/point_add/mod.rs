@@ -79,6 +79,8 @@ mod ladder_full;
 #[cfg(test)]
 mod ladder_stream;
 #[cfg(test)]
+mod mbuc_dump;
+#[cfg(test)]
 mod qaddend_testbed;
 #[cfg(test)]
 mod toy_field;

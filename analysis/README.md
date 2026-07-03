@@ -8,6 +8,7 @@ nothing here can affect the circuit or the score.
 |---|---|
 | `verify/solinas_reduction.py` | z3 proof: `mod_add_qq` computes `(acc+a) mod p` for **all** `acc,a ∈ [0,p)`, and its overflow ancilla uncomputes to \|0⟩. |
 | `verify/peephole_identities.py` | z3 proofs of the constprop CCX identities, the ripple-carry adder recurrence, and the borrow-chain comparator (22 lemmas). |
+| `verify/mbuc_phase_correction.py` | z3 proof of the **emitted `_fast` adder's measurement-based uncompute** — the HMR + `cz_if` phase correction the scored hot path runs but the plain-adder z3/Kani proofs never model (referee findings F1/F2, ADR 0027). Replays the **actually emitted** `cuccaro_add_fast` op-stream (dumped by the real `B` builder into `mbuc_fast_adder_ops.json` via `src/point_add/mbuc_dump.rs`; a `#[cfg(test)]` drift guard keeps the artifact byte-identical to a fresh emit) through a z3 model of `src/sim.rs`, with the measurement outcomes **free/∀** (not the random XOF), and proves — at widths 2..**256** — `acc'=(a+acc) mod 2^n`, `a`/`c_in`/carries clean, and **net phase 0 for every input and every measurement outcome** (the HMR kickback `carry·m` is exactly cancelled by `cz_if`'s `x·y·m`). A teeth check shows dropping the `cz_if` corrections makes the phase claim fail (sat). |
 | `verify/run_kani.sh` | Runs the Kani (bit-precise BMC) harnesses in `src/kani_proofs.rs` that bind to the **real Rust `alloy` U256 type** (not an abstract model). |
 | `verify/kickmix_sim.py` | Independent, spec-faithful simulator for kickmix `.kmx` circuits (the source paper's format) — re-derives the semantics `src/sim.rs` implements. |
 | `verify/validate_reference_adders.py` | Fuzz-validates the **source paper's** reference in-place adders (`verify/reference_circuits/`, from arXiv:2603.28846v2) — correct output, clean/dirty ancilla restored, phase +1 — and confirms its three negative-control circuits are **rejected**. |
@@ -34,7 +35,7 @@ runner — replaces the old `analysis/run.sh`):
 
 ```bash
 uv sync --locked      # build the locked analysis env (z3, Python 3.11 floor)
-uv run just analysis  # z3 proofs + cost model, 13 stages, on the locked venv
+uv run just analysis  # z3 proofs + cost model, 14 stages, on the locked venv
 uv run just depth     # measure depth -> depth.json (needs ops.bin)
 uv run just kani      # Kani proofs on real Rust types (needs cargo kani)
 just                  # list every recipe
