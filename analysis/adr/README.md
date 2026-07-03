@@ -24,3 +24,4 @@ Format: Status · Context · Decision · Consequences (lightweight MADR).
 | [0014](0014-quantum-addend-testbed.md) | Quantum-addend point-add testbed: a QROM-fed add, verified by simulation (Tier B, issue #27/#28) | Accepted (v1: QROM read→q-q add→unread sim-verified; modular/EC-exception next) |
 | [0015](0015-offset-window-encoding.md) | Offset window encoding removes the zero-window ∞ exceptional term | Accepted (dominant ∞ term removed structurally; bound sharpened to ~2⁻²⁵⁰) |
 | [0016](0016-exact-mid-ladder-bound.md) | Exact end-to-end bound on the mid-ladder exceptional amplitude | Accepted (exact <= union, <<1% at attack scale; circuit demo rides on #27) |
+| [0017](0017-true-quantum-addend-ladder.md) | True quantum-addend windowed ladder: multi-window, register-overlapped, depth-honest (Tier B, issue #27 item 2) | Accepted (multi-window accumulation sim-verified; read→add serialization depth measured vs ladder_full's disjoint model) |

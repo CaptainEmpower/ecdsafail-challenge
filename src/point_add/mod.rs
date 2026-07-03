@@ -75,6 +75,8 @@ mod ladder_composition;
 #[cfg(test)]
 mod ladder_full;
 #[cfg(test)]
+mod ladder_stream;
+#[cfg(test)]
 mod qaddend_testbed;
 
 mod emit;

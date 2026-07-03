@@ -47,14 +47,16 @@
 //! then unread, is simulation-verified to compute `acc + P[k]` with all ancilla
 //! clean. So the quantum-addend point-add is no longer hypothetical.
 //!
-//! **Still not measured here** (the remaining Tier B build): the **exact depth** of
-//! a *functionally composed full-width* ladder — this repo's scored PA folds a
-//! *classical* compile-time addend, whereas the ladder loads `P[k]` from a *quantum*
-//! table that the addition then consumes (the read→add data dependency, exhibited
-//! at small width in the testbed). Emitting the lookup on *disjoint* ids (as here)
-//! UNDER-counts the serial depth, so depth is reported as the measured add-dominated
-//! critical path, flagged. Issue #5's mid-ladder ∞/`dx=0` residual lands in that
-//! same quantum-addend testbed and is out of scope for this cost harness.
+//! **The read→add serialization depth is now measured** (`ladder_stream.rs`, ADR
+//! 0017): emitting the lookup on *disjoint* ids (as here) UNDER-counts the serial
+//! depth, so depth is reported below as the add-dominated critical path, flagged.
+//! `ladder_stream.rs` closes that gap — it streams the *true* quantum-addend
+//! read→add→unread (the QROM writing the addend the adder consumes) over the real
+//! 28-window count with the workspace reused across windows, and measures the true
+//! serialized toffoli-depth against exactly this disjoint model; the delta is the
+//! per-window QROM serialization depth this harness omits. Issue #5's mid-ladder
+//! ∞/`dx=0` residual lands in that same quantum-addend testbed and is out of scope
+//! for this cost harness.
 //!
 //! `#[cfg(test)]` only; never compiled into the scored circuit.
 
