@@ -159,7 +159,7 @@ cargo kani --harness solinas_add_u256   VERIFICATION: SUCCESSFUL  (0 of 139 fail
 > `cz_if` phase-kickback) whose phase logic these proofs do not model. That layer
 > is covered by the 9024-shot sample, not by the formal proofs. The machine-checked
 > guarantee is therefore an **integer-identity** guarantee on the plain adder at
-> production width (256/257, ADR 0024), not a gate-level proof of the emitted
+> production width (256/257, ADR 0024, PR #64), not a gate-level proof of the emitted
 > measurement-based circuit.
 
 A useful negative result: a harness over the real `sub_mod` (which calls ruint's

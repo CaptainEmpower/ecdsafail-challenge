@@ -49,7 +49,7 @@ analysis docs:
   items.
 
 This ADR is disclosure, not new proof. What *is* closed by construction is F3
-(production-width z3 proof, ADR 0024); F1/F2/F4/F5 are closed by making the prose
+(production-width z3 proof, ADR 0024, PR #64); F1/F2/F4/F5 are closed by making the prose
 match the artifact. An optional future increment (a z3/sim model of the `hmr` +
 `cz_if` phase correction, or a Kani harness bound to the emitter) would upgrade
 F1/F2 from disclosure to coverage.

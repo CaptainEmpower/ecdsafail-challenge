@@ -63,7 +63,7 @@ tracked as referee finding F7, issue #61.)*
    `(acc+a) mod p` for all `acc,a ∈ [0,p)` and to uncompute its overflow ancilla
    (reversibility) via z3; the peephole/adder/comparator lemmas are `unsat` on
    negation, the adder/comparator recurrences at production 256/257-bit width
-   (ADR 0024). The same control flow is re-proved with **Kani** bit-precise bounded
+   (ADR 0024, PR #64). The same control flow is re-proved with **Kani** bit-precise bounded
    model checking on the real `alloy_primitives::U256` type against the true
    secp256k1 prime. *Scope (referee F1/F2): the proofs model the **plain**
    `mod_add_qq` integer identity — the Kani harness is a hand-written
