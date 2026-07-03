@@ -77,11 +77,24 @@ out, not silently skipped).
 - **The exceptional set is shown reversibly detectable.** `dx=0 / acc=∞ / addend=∞`
   are flagged by a small ancilla-clean circuit — the same signal a real ladder would
   use to detect (and a completeness proof to bound) the bad inputs.
-- **Scope (honest).** Still a reduced toy curve, and the detector *detects* the
-  exceptional inputs rather than *handling* them with complete formulas; the
-  reversible λ-division point-add (and its exceptional-branch handling) is a separate
-  increment. The scalar model is now confirmed on real coordinates, which is what the
-  completeness bound needs.
+- **Scope (honest), and why it is the right scope.**
+  - *Detection, not complete-formula handling.* This repo's completeness approach is
+    **Path A (negligibility)**, decided in [ADR 0006](0006-adder-completeness-approach.md)
+    — *not* Path B (complete Edwards/unified formulas in the scored adder). Path A's
+    correctness rests on the exceptional inputs being **rare and well-characterised**,
+    which is exactly what a detector measures; implementing complete formulas in the
+    scored point-add would change `ops.bin`/the score and contradict ADR 0006. So the
+    detector is the right instrument for Path A; the full reversible λ-division
+    point-add (with exceptional-branch *handling*) is a separate, larger increment,
+    relevant only if the project ever switches to Path B.
+  - *Toy curve, multiple widths.* The confirmation runs over **several** real
+    prime-order curves (orders 19/29/41) and window widths (`w = 2..5`), so it is not
+    a single-`w`/single-curve artifact. An *exhaustive* real-coordinate sweep
+    inherently needs a small curve; the attack-scale (`n≈2²⁵⁶`) end-to-end bound is
+    the scalar-model **union bound** ([ADR 0016](0016-exact-mid-ladder-bound.md)),
+    which an exact convolution cannot reach — and this PR confirms, on real
+    coordinates across every toy config, that the per-pair predicate that union bound
+    is built from is exactly right.
 - Consistent with [ADR 0001](0001-analysis-layer-isolated-from-score.md): the harness
   is `#[cfg(test)]`, never compiled into `build_circuit`; the scored circuit is
   byte-identical (`ops.bin` SHA unchanged).

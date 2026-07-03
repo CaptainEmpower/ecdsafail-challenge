@@ -25,14 +25,21 @@
 //!      `acc_inf = ((x1,y1)==sentinel)`, `add_inf = ((x2,y2)==sentinel)` — and
 //!      simulation-verifies it on crafted exceptional/generic inputs (ancilla clean);
 //!   3. **measures** the detector over ALL `(accumulator, addend)` coordinate pairs
-//!      of the curve (masked multi-shot) and asserts the measured real-coordinate
-//!      exceptional predicate equals the scalar/dlog predicate `(m==0) ∨ (y==0) ∨
-//!      (y ≡ ±m)` on every pair — the circuit-level confirmation of the model;
+//!      of the group (masked multi-shot), across **several** prime-order curves
+//!      (orders 19/29/41), and asserts the measured real-coordinate exceptional
+//!      predicate equals the scalar/dlog predicate `(m==0) ∨ (y==0) ∨ (y ≡ ±m)` on
+//!      every pair — the circuit-level confirmation of the model;
 //!   4. drives the ADR 0016 end-to-end survival recursion with the CIRCUIT-measured
-//!      predicate over the real two-scalar `[a]P+[b]Q` toy ladder, reporting the
-//!      exact mid-ladder residual and confirming `exact ≤ union`, and that the
-//!      **offset** encoding (ADR 0015) yields `add_inf = 0` at every window on real
-//!      coordinates — the zero-window-`∞` pin, circuit-confirmed.
+//!      predicate over the real two-scalar `[a]P+[b]Q` toy ladder, at window widths
+//!      `w = 2..5` (not a single-`w` artifact), reporting the exact mid-ladder
+//!      residual and confirming `exact ≤ union`, and that the **offset** encoding
+//!      (ADR 0015) yields `add_inf = 0` at every window on real coordinates — the
+//!      zero-window-`∞` pin, circuit-confirmed.
+//!
+//! This is Path A (negligibility, ADR 0006): the detector *characterises* the rare
+//! exceptional inputs — it does not add complete-formula *handling* to the scored
+//! adder (that would be Path B and change the score). The full reversible λ-division
+//! point-add is a separate increment.
 //!
 //! `#[cfg(test)]` only; never compiled into the scored circuit (ops.bin unchanged).
 
@@ -154,6 +161,17 @@ impl ToyCurve {
         let on_curve = |x: u64, y: u64| {
             fmul(y, y, p) == fadd(fadd(fmul(x, fmul(x, x, p), p), fmul(a, x, p), p), b, p)
         };
+        // `finv` uses Fermat inversion (a^(p−2)), valid only for prime `p`; and the
+        // `(0,0)` `∞` sentinel must be off-curve so it never aliases a real point.
+        // Assert both up front — a param change can't silently invalidate the model.
+        assert!(
+            is_prime(p),
+            "field modulus p={p} must be prime (Fermat inversion)"
+        );
+        assert!(
+            !on_curve(0, 0),
+            "(0,0) ∞-sentinel must be off-curve for (p={p},a={a},b={b})"
+        );
         let mut pts = vec![Pt::Inf];
         for x in 0..p {
             for y in 0..p {
@@ -461,7 +479,10 @@ fn ladder_windows(n: u64, w: u32, d: u64) -> Vec<u64> {
 
 /// End-to-end exact failed count over the toy ladder, driven by a predicate
 /// `exc(y, m)`. Mirrors `mid_ladder_bound.py::analyze` (integer survival mass with
-/// a rational denominator tracked as `big^k`). Returns `(failed_num, denom, union_num, union_den, add_inf_seen)`.
+/// a rational denominator tracked as `big^k`). Returns
+/// `(failed_num, failed_den, union, add_inf_seen)`: the exact failed amplitude as a
+/// reduced fraction `failed_num/failed_den`, the union bound as an `f64` (comparison
+/// only), and whether any window emitted the `addend=∞` (`m==0`) entry.
 fn end_to_end(
     n: u64,
     w: u32,
@@ -554,85 +575,97 @@ fn gcd(a: u128, b: u128) -> u128 {
 
 #[test]
 fn real_coord_exceptional_matches_scalar_model() {
-    let curve = ToyCurve::new(17, 2, 2);
-    let n = curve.n;
-    let nn = n as usize;
-
-    // (3) circuit-measured real-coordinate verdict == scalar/dlog predicate,
-    //     for EVERY (accumulator, addend) pair.
-    let e = measure_exceptional_table(&curve);
-    let mut mismatches = 0;
-    for y in 0..nn {
-        for m in 0..nn {
-            if e[y * nn + m] != scalar_exceptional(y as u64, m as u64, n) {
-                mismatches += 1;
-            }
-        }
-    }
-    assert_eq!(
-        mismatches, 0,
-        "real-coordinate detector disagrees with the scalar/dlog model on {mismatches} pairs"
-    );
-
-    // (4) end-to-end mid-ladder residual on the real toy ladder, using the
-    //     CIRCUIT-measured predicate; exact ≤ union; offset ⇒ no addend=∞.
-    let w = 2u32;
-    let d = 7u64;
-    let windows = ladder_windows(n, w, d);
-    let circ_exc = |y: u64, m: u64| e[(y as usize) * nn + (m as usize)];
-
-    let (std_num, std_den, std_union, std_addinf) = end_to_end(n, w, &windows, false, &circ_exc);
-    let (off_num, off_den, off_union, off_addinf) = end_to_end(n, w, &windows, true, &circ_exc);
-
-    let std_exact = std_num as f64 / std_den as f64;
-    let off_exact = off_num as f64 / off_den as f64;
-    assert!(std_exact <= std_union + 1e-12, "std exact exceeds union");
-    assert!(off_exact <= off_union + 1e-12, "offset exact exceeds union");
-    assert!(off_exact <= std_exact, "offset exact not <= standard exact");
-    // Circuit-confirmed zero-window pin: offset never emits the addend=∞ entry.
-    assert!(
-        std_addinf,
-        "standard encoding expected to hit a zero-window addend=∞"
-    );
-    assert!(
-        !off_addinf,
-        "offset encoding must never emit addend=∞ (ADR 0015)"
-    );
-
-    // Cross-check the end-to-end number against the pure scalar predicate too
-    // (they must be identical since the per-pair predicates matched above).
-    let scal_exc = |y: u64, m: u64| scalar_exceptional(y, m, n);
-    let (s2_num, s2_den, _, _) = end_to_end(n, w, &windows, false, &scal_exc);
-    assert_eq!(
-        std_num * s2_den,
-        s2_num * std_den,
-        "circuit-driven end-to-end != scalar-driven end-to-end"
-    );
-
+    // Multiple real prime-order toy curves × window widths — so the confirmation
+    // is not a `w=2`/single-curve artifact. (An exhaustive real-coordinate sweep
+    // requires a small curve; attack-scale n≈2²⁵⁶ is covered by the scalar-model
+    // union bound in `mid_ladder_bound.py`/ADR 0016, infeasible to sweep exactly.)
+    // (p, a, b, d secret, [window widths]) — each with 2^w < n for the offset pin.
+    let configs: &[(u64, u64, u64, u64, &[u32])] = &[
+        (17, 2, 2, 7, &[2, 3, 4]),     // order 19
+        (23, 1, 4, 11, &[2, 3, 4]),    // order 29
+        (31, 1, 3, 13, &[2, 3, 4, 5]), // order 41
+    ];
     eprintln!(
         "\n=== issue #28: real-coordinate mid-ladder residual, circuit-confirmed (ADR 0018) ==="
     );
+
+    for &(p, a, b, d, ws) in configs {
+        let curve = ToyCurve::new(p, a, b);
+        let n = curve.n;
+        let nn = n as usize;
+
+        // (3) circuit-measured real-coordinate verdict == scalar/dlog predicate,
+        //     for EVERY (accumulator, addend) pair of the whole group.
+        let e = measure_exceptional_table(&curve);
+        let mut mismatches = 0;
+        for y in 0..nn {
+            for m in 0..nn {
+                if e[y * nn + m] != scalar_exceptional(y as u64, m as u64, n) {
+                    mismatches += 1;
+                }
+            }
+        }
+        assert_eq!(
+            mismatches, 0,
+            "detector disagrees with the scalar/dlog model on {mismatches} pairs (n={n})"
+        );
+        let circ_exc = |y: u64, m: u64| e[(y as usize) * nn + (m as usize)];
+        let scal_exc = |y: u64, m: u64| scalar_exceptional(y, m, n);
+
+        eprintln!("  curve (p={p},a={a},b={b}) n={n} (prime): detector == scalar model on all {nn}×{nn} pairs (0 mismatches)");
+
+        // (4) end-to-end mid-ladder residual over the real two-scalar ladder, at
+        //     several window widths, driven by the CIRCUIT-measured predicate.
+        for &w in ws {
+            assert!((1u64 << w) < n, "offset pin needs 2^w < n (w={w}, n={n})");
+            let windows = ladder_windows(n, w, d);
+            let (std_num, std_den, std_union, std_addinf) =
+                end_to_end(n, w, &windows, false, &circ_exc);
+            let (off_num, off_den, off_union, off_addinf) =
+                end_to_end(n, w, &windows, true, &circ_exc);
+            let std_exact = std_num as f64 / std_den as f64;
+            let off_exact = off_num as f64 / off_den as f64;
+
+            assert!(
+                std_exact <= std_union + 1e-12,
+                "std exact exceeds union (n={n},w={w})"
+            );
+            assert!(
+                off_exact <= off_union + 1e-12,
+                "offset exact exceeds union (n={n},w={w})"
+            );
+            assert!(
+                off_exact <= std_exact,
+                "offset exact not <= standard (n={n},w={w})"
+            );
+            // Circuit-confirmed zero-window pin: standard hits addend=∞, offset never.
+            assert!(
+                std_addinf,
+                "standard encoding expected a zero-window addend=∞ (n={n},w={w})"
+            );
+            assert!(
+                !off_addinf,
+                "offset must never emit addend=∞ (ADR 0015; n={n},w={w})"
+            );
+
+            // The circuit-driven end-to-end equals the pure scalar-driven one
+            // (identical per-pair predicates, verified above).
+            let (s_num, s_den, _, _) = end_to_end(n, w, &windows, false, &scal_exc);
+            assert_eq!(
+                std_num * s_den,
+                s_num * std_den,
+                "circuit-driven end-to-end != scalar-driven (n={n},w={w})"
+            );
+            eprintln!(
+                "    w={w} ({} windows): exact std={std_exact:.3e}≤union{std_union:.3e}, \
+                 off={off_exact:.3e}≤union{off_union:.3e}; offset addend=∞: never",
+                windows.len()
+            );
+        }
+    }
+    eprintln!("  => the scalar-model exact bound (ADR 0016) holds at the CIRCUIT level over real");
+    eprintln!("     coordinate arithmetic, across curves and window widths; the incomplete-affine");
     eprintln!(
-        "  n={n} (prime), w={w}, {} windows: real-coordinate detector agrees with the scalar/dlog",
-        windows.len()
+        "     exceptional set is exactly the x-equality/∞ set a reversible detector measures."
     );
-    eprintln!(
-        "  model on ALL {}×{} (acc,addend) pairs — 0 mismatches.",
-        nn, nn
-    );
-    eprintln!(
-        "  end-to-end exact P[≥1 exceptional]: std={std_exact:.4e} (≤ union {std_union:.4e}), \
-         offset={off_exact:.4e} (≤ union {off_union:.4e})"
-    );
-    eprintln!(
-        "  offset addend=∞ on real coordinates: {} (ADR 0015 zero-window pin, circuit-confirmed)",
-        if off_addinf { "PRESENT (BUG)" } else { "never" }
-    );
-    eprintln!(
-        "  => the scalar-model exact bound (ADR 0016) is confirmed at the CIRCUIT level over"
-    );
-    eprintln!(
-        "     real coordinate arithmetic; the incomplete-affine exceptional set is exactly the"
-    );
-    eprintln!("     x-equality/∞ set a reversible detector measures.");
 }
