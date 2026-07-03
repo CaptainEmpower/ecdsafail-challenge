@@ -43,9 +43,13 @@ not a smaller estimate.
 | Mid-ladder exceptional amplitude | `≈2⁻²⁵⁰` (offset) / `≈2⁻¹¹` (std) | exact, `≪` Shor's ~1% |
 | Physical (coarse) | ~5 min runtime, ~3.4M physical qubits @ d=27 | surface-code cost model |
 
-Against the published point-addition bounds (Babbush et al. 2026): Low-Qubit
+Against the Babbush et al. 2026 point-addition operating points — Low-Qubit
 `≤2.7M Toffoli / 1175 q`, Low-Gate `≤2.1M / 1425 q` — the measured `1.36M / 1152`
-is under **both**.
+is under **both**. *(Provenance note: Babbush et al.'s **public** headline is the
+full-ECDLP totals `<1200 q/<90M` and `<1450 q/<70M`; these per-point-addition
+Pareto points are the challenge's reference numbers for the same line of work.
+Pin the exact source — paper table vs. organizer-supplied — before submission;
+tracked as referee finding F7, issue #61.)*
 
 ## 2. Contributions
 
@@ -109,9 +113,12 @@ SHA-256); all reported numbers follow deterministically.
 - The full-ECDLP figure is **derived/composed** (measured point-add × the source
   paper's windowed-ladder structure), not an independent end-to-end circuit or a new
   algorithm; it does not compete with the space-optimized algorithmic results
-  (Chevignard et al. 2026, 1098 qubits; Han Luo et al. 2026, 1333 qubits).
-- `1168` qubits (paper bound A2) is not the qubit frontier; a faithful
-  resident-quantum-addend port is measured wider (1424–1680). The honest headline is
+  (Chevignard et al. 2026, **1193 qubits for P-256** — their 1098 is the P-224
+  figure; Han Luo et al. 2026, 1333 qubits).
+- `1168` qubits (paper bound A2) is not the qubit frontier; that bound is not a
+  figure this repo's circuit independently realizes — the faithful
+  resident-quantum-addend port is measured wider (1424–1680), above the P-256
+  frontier. The honest headline is
   *Toffoli-competitive with a stronger correctness/completeness guarantee*.
 - Toffoli×qubits is a competition figure of merit; the physical cost model is a
   coarse upper bound (above the source paper's optimized `<500k` physical qubits).
@@ -129,7 +136,8 @@ Google Quantum AI — zero-knowledge proof *of resource costs*, ≥99% Fiat–Sh
 correctness, no explicit completeness treatment); Han Luo et al. 2026
 (arXiv:2604.02311, Tsinghua/Peking — space-optimized Proos–Zalka EEA inversion, 1333
 qubits); Chevignard–Fouque–Schrottenloher, EUROCRYPT 2026 (ePrint 2026/280 —
-space-optimized inversion, 1098 qubits, the current qubit frontier). This work is
+space-optimized inversion, 1193 qubits for P-256 — 1098 qubits is their P-224
+figure — the current qubit frontier). This work is
 orthogonal: it adds machine-checked correctness, computed/verified completeness, and
 full reproducibility to an aggressively optimized primitive.
 
