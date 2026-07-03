@@ -130,12 +130,20 @@ literature. This is what justifies `completeness_overhead = 1.0` in
 
 ## Caveats (what keeps this an argument, not a proof)
 
-- **Equidistribution is no longer load-bearing.** The `~1/n` per-addition rate was
+- **Equidistribution is removed at *toy* scale, but is still the *attack-scale*
+  bound (referee F5, ADR 0026).** The exact end-to-end computation
+  (`mid_ladder_bound.py`) avoids equidistribution — but only for `n = 1009/2003`,
+  where the `O(n⁴)` convolution is feasible. At attack scale (`n ≈ 2²⁵⁶`) that
+  computation is infeasible and the reported number falls back to the analytic
+  `28·2/n` — which *is* the equidistribution value. So the honest statement is:
+  equidistribution is *validated* (not assumed) on toy curves, and remains the
+  load-bearing model for the 256-bit headline. The `~1/n` per-addition rate was
   originally justified by assuming the accumulator's x-coordinate is approximately
-  uniform over the superposition. A rigorous treatment would bound the actual
+  uniform over the superposition. A rigorous 256-bit treatment would bound the actual
   distribution of partial-scalar multiples
   (or invoke a specific ladder ordering that provably avoids `{M,−M}`), as
-  Roetteler et al. discuss. That assumption has since been removed on two fronts:
+  Roetteler et al. discuss. The assumption has been *empirically* removed on two fronts
+  at toy scale:
   [ADR 0008](adr/0008-empirical-completeness-collision-rate.md) /
   `verify/completeness_collision_rate.py` measured the rate exactly and found it is
   `O(1)·2/n` and **insensitive to the accumulator's shape** (holding even 250× from
@@ -197,3 +205,19 @@ literature. This is what justifies `completeness_overhead = 1.0` in
   the *attack*, not only for the amplitude figure. This is the executable end-to-end
   complement to the exact bound (§4, ADR 0016) and the reversible detector (ADR 0018):
   the completeness argument now ends in a recovered secret.
+
+  > **What the recovery does and does not run (referee F4, ADR 0026).** The oracle
+  > in `shor_ecdlp_recovery.py` is a **Python model** of the affine adder
+  > (chord-only, `inv(0):=0`, toy field `p ≤ 41`), *not* the scored secp256k1
+  > circuit — which uses a Kaliski almost-inverse and is never executed in this
+  > pipeline (`ladder_full.rs` invokes `build()` only to *count* gates). The model
+  > is deterministic and phase-clean, whereas the gating experiment (§2) measures
+  > the **actual** circuit emitting *probabilistic phase garbage* on `dx=0`
+  > (~9/16 seeds). So the recovery demonstrates that an incomplete adder + the
+  > offset/direct-lookup handling *suffices* for the ideal-Shor math on toy curves;
+  > it does **not** exercise the scored circuit's measured exceptional behaviour.
+  > The claim is therefore "demonstrated at toy scale with a model adder", not
+  > "demonstrated with the incomplete adder this circuit implements". The
+  > amplitude bound (§4) — which only needs the exceptional *amplitude*, however
+  > the phase corrupts — remains the load-bearing completeness argument; the
+  > recovery is a corroborating existence check on a model.

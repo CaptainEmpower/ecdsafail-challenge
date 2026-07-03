@@ -63,6 +63,18 @@ area with multiple 2026 results:
    deterministic analysis suite, ADR trail. Reproducibility at this granularity is
    uncommon for resource-estimate papers.
 
+> **Scope discipline for items 1–2 (referee F1/F2/F4/F5, ADR 0026).** State these
+> precisely or they overclaim: (1) the machine-checked layer covers the **plain**
+> `mod_add_qq` **integer identity** (Kani proves a re-implementation, not the
+> emitter); the scored circuit's emitted `_fast` measurement-based adder is covered
+> by the 9024-shot sample, not the proofs. (2) The completeness bound is **exact at
+> toy scale** and an **analytic union bound (equidistribution)** at attack scale;
+> the demonstrated recovery runs a **model** adder in Python, not the scored
+> circuit (whose measured `dx=0` phase-garbage the model does not reproduce). The
+> defensible framing is "machine-checked integer core + simulation-backed
+> completeness argument, demonstrated at toy scale" — still a real delta vs.
+> fuzz-only/negligibility-by-citation, but narrower than the bare verbs imply.
+
 ## What is NOT a strong claim (be honest)
 
 - **Not a new algorithm.** The point-add uses known techniques (Cuccaro, Solinas,
