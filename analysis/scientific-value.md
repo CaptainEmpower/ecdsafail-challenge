@@ -50,9 +50,23 @@ Two senses of "cryptanalysis" pull apart here, and the honest answer differs:
   occurrences of SMT/z3/model-checking or an explicit point-at-infinity treatment in
   any of them). This repo instead **machine-checks** the load-bearing arithmetic over
   all inputs (z3 + Kani on the real `alloy` U256 type, §1) and turns completeness from
-  a cited argument into a **computed + circuit-verified** result (`≈2⁻²⁵⁰` exact bound,
-  reversible real-coordinate detector — see `completeness_argument.md`,
+  a cited argument into a **computed + circuit-confirmed** result (`≈2⁻²⁵⁰` bound —
+  exact at toy scale, an analytic union upper bound at attack scale — plus a
+  reversible real-coordinate detector; see `completeness_argument.md`,
   `ec_exceptional.rs`).
+
+  > **Scope of "machine-checks" and "computed + circuit-confirmed" (referee
+  > F1/F2/F4/F5, ADR 0026).** These verbs are load-bearing, so state exactly what
+  > they cover. The z3/Kani layer proves the *integer identity* of the **plain**
+  > `mod_add_qq` (and Kani proves a hand-written re-implementation, not the
+  > gate-emitting builder); the scored circuit's hot path emits the **`_fast`
+  > measurement-based** variant (`cuccaro_add_fast` + `hmr`/`cz_if`), whose phase
+  > logic is validated only by the 9024-shot sample (§1c). The completeness bound
+  > is exact only on toy curves; at attack scale it is the analytic union bound.
+  > The "demonstrated recovery" runs a *model* adder in Python, not the scored
+  > circuit (§4). So the honest reading is: a machine-checked **integer core** and
+  > a **simulation-backed** completeness argument — narrower than the bare verbs
+  > suggest, and deliberately re-scoped here.
 
 So the deliverable is not a break but a **standard of evidence**: a template showing
 that "X qubits, Y Toffoli" estimates *can* be machine-checked and
@@ -133,6 +147,20 @@ cargo kani --harness solinas_add_u256   VERIFICATION: SUCCESSFUL  (0 of 139 fail
   real U256 values, against the **real secp256k1 prime** (`SECP256K1_P`), and
   proves it equals a division-free ground truth for all `a,b ∈ [0,p)`.
 - `solinas_add_u64` is a fast small-width twin proving the control flow itself.
+
+> **What "binding to the real types" does and does not cover (referee F1/F2,
+> ADR 0026).** `solinas_add_u256` uses the real `U256`/`SECP256K1_P`, but it is a
+> **hand-written re-implementation** of the control flow ("on plain integers
+> instead of emitted gates", `kani_proofs.rs`) — Kani proves *that function*, not
+> the gate-emitting `mod_add_qq` builder, so a drift between the two would not be
+> caught. And both z3 and Kani model the **plain** `mod_add_qq`; the scored
+> circuit's hot path emits `mod_add_qq_fast` (58 call sites vs 3 for the plain
+> variant), a `cuccaro_add_fast` with **measurement-based uncompute** (`hmr` +
+> `cz_if` phase-kickback) whose phase logic these proofs do not model. That layer
+> is covered by the 9024-shot sample, not by the formal proofs. The machine-checked
+> guarantee is therefore an **integer-identity** guarantee on the plain adder at
+> production width (256/257, ADR 0024), not a gate-level proof of the emitted
+> measurement-based circuit.
 
 A useful negative result: a harness over the real `sub_mod` (which calls ruint's
 256-bit `%`) does **not** converge — Knuth long division has data-dependent loops
