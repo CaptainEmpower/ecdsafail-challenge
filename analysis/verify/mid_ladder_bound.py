@@ -39,6 +39,8 @@ def ladder_windows(n, w, d):
     """The combined `[a]P + [b]Q` ladder's per-window base constants: t windows of
     base P (`c = 2^{w i}`) then t of base Q = [d]P (`c = 2^{w j}·d`). Returns
     (t, windows)."""
+    if w <= 0:
+        raise ValueError(f"window width w must be positive, got {w}")
     t = 0
     while (1 << (w * t)) < n:
         t += 1
@@ -52,6 +54,10 @@ def analyze(n, w, d, offset):
 
     Returns dict with 'exact' = P[≥1 exceptional] and 'union' = Σ per-addition
     rate, both as Fractions, plus a survival sanity total."""
+    if offset and (1 << w) >= n:
+        # offset digits v ∈ [1, 2^w] are ∞-free only when none is ≡ 0 mod n, i.e.
+        # 2^w < n (mirrors offset_window_encoding.py's precondition).
+        raise ValueError(f"offset mode requires 2^w < n; got 2^{w}={1 << w} >= n={n}")
     _, windows = ladder_windows(n, w, d)
     vals = list(range(1, (1 << w) + 1)) if offset else list(range(1 << w))
     big = 1 << w  # |window value set| == 2^w for both encodings
@@ -153,20 +159,26 @@ def main():
                   f"{float(r['exact']):>12.4e} {float(r['union']):>12.4e} {ratio:>11.4f}")
     print()
 
-    # Extrapolation to attack parameters.
+    # Rigorous end-to-end UPPER bound at attack parameters. An EXACT convolution
+    # at n≈2²⁵⁶ is infeasible (2²⁵⁶ distribution entries), so the rigorous
+    # end-to-end bound at attack scale is the analytic UNION bound — a proven upper
+    # bound, `P[⋃ A_k] ≤ Σ P[A_k]` — evaluated in closed form from the same
+    # per-addition rates (`dx=0` = 2/n; zero-window ∞ = 1/2^w). The toy configs
+    # above certify this is not loose: there the exact `P[⋃ A_k]` is computed and
+    # is ≤ the union bound (and a sizable fraction of it).
     import math
     N_REAL, W_REAL, ADDS = 2 ** 256, 16, 28
-    # exact ~ union for rare events; use the measured std/off union structure:
-    dx0 = ADDS * 2.0 / N_REAL                    # dx=0-limited term
-    zerowin = ADDS * (1.0 / (1 << W_REAL))       # standard zero-window INF term
-    print("Extrapolation to attack parameters  (n≈2²⁵⁶, w=16, 28 additions)")
+    dx0 = ADDS * 2.0 / N_REAL                    # dx=0 union term
+    zerowin = ADDS * (1.0 / (1 << W_REAL))       # standard zero-window ∞ union term
+    print("Rigorous end-to-end UPPER bound at attack parameters  (union; exact ≤ this)")
+    print("  (n≈2²⁵⁶, w=16, 28 additions; exact convolution at this n is infeasible)")
     print("-" * 74)
-    print(f"  standard : exact ≈ union ≈ dx=0 + zero-window ∞ ≈ {dx0 + zerowin:.2e} "
+    print(f"  standard : union = dx=0 + zero-window ∞ = {dx0 + zerowin:.2e} "
           f"(≈ 2^{math.log2(dx0 + zerowin):.0f}, ∞-dominated)")
-    print(f"  offset   : exact ≈ union ≈ dx=0 only            ≈ {dx0:.2e} "
+    print(f"  offset   : union = dx=0 only            = {dx0:.2e} "
           f"(≈ 2^{math.log2(dx0):.0f})")
-    print(f"  both ≪ Shor's ~1e-2 tolerance; the exact ladder bound confirms the")
-    print(f"  union-bounded headline is not loose enough to matter.")
+    print(f"  both ≪ Shor's ~1e-2 tolerance. The toy `exact ≤ union` results above")
+    print(f"  certify this union bound is a rigorous — and not loose — end-to-end bound.")
     print()
 
     # ---- assertions ---- #
@@ -194,13 +206,13 @@ def main():
     notes.append(f"[{'ok' if c3 else 'XX'}] offset exact < standard exact on all "
                  f"configs (zero-window ∞ term removed; ADR 0015)")
 
-    # (4) extrapolated to attack parameters, both encodings sit far below Shor's
-    #     ~1% tolerance (the toy configs have LARGE rates by design — the rates
-    #     scale as 2/n and 1/2^w, tiny only at n≈2²⁵⁶, w=16).
+    # (4) the rigorous union UPPER bound at attack parameters is ≪ Shor's ~1%
+    #     tolerance for both encodings (exact ≤ union, certified on the toys; the
+    #     toy rates are LARGE by design — they scale as 2/n and 1/2^w).
     c4 = (dx0 + zerowin) < 1e-2 and dx0 < 1e-60
     ok &= c4
-    notes.append(f"[{'ok' if c4 else 'XX'}] extrapolated exact ≈ union ≪ 1e-2 at "
-                 f"n≈2²⁵⁶ (std {dx0 + zerowin:.1e}, offset {dx0:.1e})")
+    notes.append(f"[{'ok' if c4 else 'XX'}] union UPPER bound ≪ 1e-2 at n≈2²⁵⁶ "
+                 f"(std {dx0 + zerowin:.1e}, offset {dx0:.1e}); exact ≤ union on toys")
 
     print("Findings")
     print("-" * 74)
@@ -209,11 +221,12 @@ def main():
     print()
     print("=" * 74)
     if ok:
-        print(" RESULT: the mid-ladder exceptional amplitude is now bounded EXACTLY")
-        print(" end-to-end (not only by a per-addition union bound), and the exact")
-        print(" value never exceeds the union bound and stays far below Shor's")
-        print(" tolerance — under both the standard and the ∞-free offset encoding")
-        print(" (issue #28; the completeness axis of #5).")
+        print(" RESULT: the mid-ladder exceptional amplitude is bounded EXACTLY")
+        print(" end-to-end on the toy ladders (not only by a per-addition union")
+        print(" bound), and the exact value never exceeds the union bound. At attack")
+        print(" scale — where an exact convolution is infeasible — the rigorous")
+        print(" end-to-end bound is that union UPPER bound, ≪ Shor's tolerance under")
+        print(" both the standard and the ∞-free offset encoding (issue #28 / #5).")
         print("=" * 74)
         return 0
     print(" RESULT: FAILURE — see [XX] above.")

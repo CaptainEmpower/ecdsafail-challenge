@@ -107,10 +107,11 @@ sub-cases and are already included in the `A ∈ {M,−M}` count.
 > `verify/mid_ladder_bound.py` computes the exact `P[⋃_k A_k]` — the probability
 > that *any* addition is exceptional across the real two-scalar ladder — by
 > tracking the accumulator's clean (never-yet-exceptional) mass through the whole
-> run. On every toy config the exact amplitude is `≤` this union bound and, at
-> attack parameters, `≈ 2⁻²⁵⁰` under the offset encoding (`≈ 2⁻¹¹` if the
-> zero-window `∞` term is not removed) — so the `≪ 10⁻²` headline holds not only
-> as an upper bound but as the exact ladder amplitude.
+> run. On every toy config the exact amplitude is `≤` this union bound. At attack
+> parameters an exact convolution is infeasible, so the rigorous end-to-end bound
+> is the union upper bound itself — `≈ 2⁻²⁵⁰` under the offset encoding (`≈ 2⁻¹¹`
+> if the zero-window `∞` term is not removed), both `≪ 10⁻²`; the toy `exact ≤
+> union` results certify it is not loose.
 
 ## 5. Conclusion
 

@@ -339,8 +339,9 @@ circuit (one point addition):
   accumulator's clean (never-yet-exceptional) mass through the whole run — the exact
   `P[⋃_k A_k]`, which it verifies is `≤` the completeness argument's union bound on
   every config (and `exact + survival == 1` exactly, so no mass is lost). At attack
-  parameters this is `≈2⁻²⁵⁰` (offset) / `≈2⁻¹¹` (standard) — both `≪` Shor's `~1%`,
-  now as the exact ladder amplitude rather than merely an upper bound.
+  parameters an exact convolution is infeasible, so the rigorous end-to-end bound is
+  the union upper bound (`≈2⁻²⁵⁰` offset / `≈2⁻¹¹` standard, both `≪` Shor's `~1%`) —
+  which the toy `exact ≤ union` results certify is tight, not loose.
 - **The amplitude-1 ∞ start is now circuit-demonstrated as removed (issue #5
   part (a), ADR 0009).** The one exceptional case that negligibility *cannot*
   cover — the accumulator starting at ∞ with amplitude 1 — is handled structurally

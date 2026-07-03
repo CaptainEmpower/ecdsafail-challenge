@@ -40,10 +40,13 @@ the **offset** (`ADR 0015`) encodings.
   loses no probability — the "exact" figure is exact, not an approximation.
 - **The offset encoding's benefit is end-to-end, not just per-addition**: offset
   exact `<` standard exact on every config (the zero-window `∞` term is gone).
-- **Extrapolated to attack parameters** (`n≈2²⁵⁶`, `w=16`, 28 additions): exact
-  ≈ union ≈ `2⁻¹¹` (standard, ∞-dominated) or `2⁻²⁵⁰` (offset, `dx=0`-limited) —
-  both ≪ Shor's `~1%` tolerance. (Toy-scale rates are large by design: they scale
-  as `2/n` and `1/2^w`, tiny only at attack scale.)
+- **At attack parameters** (`n≈2²⁵⁶`, `w=16`, 28 additions) an exact convolution
+  is infeasible (`2²⁵⁶` distribution entries), so the rigorous end-to-end bound is
+  the analytic **union upper bound** (`P[⋃ A_k] ≤ Σ P[A_k]`), evaluated in closed
+  form: `≈ 2⁻¹¹` (standard, ∞-dominated) or `2⁻²⁵⁰` (offset, `dx=0`-limited) — both
+  ≪ Shor's `~1%` tolerance. The toy `exact ≤ union` results certify this bound is
+  rigorous and not loose. (Toy-scale rates are large by design: they scale as
+  `2/n` and `1/2^w`, tiny only at attack scale.)
 - This closes the "union bound → exact bound" half of issue #28's definition of
   done, and pairs with #34's pinned zero-window encoding. The remaining #28 item —
   a *circuit-level* mid-ladder demonstration over real coordinate arithmetic —
