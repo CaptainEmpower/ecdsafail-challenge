@@ -39,9 +39,11 @@ just             # list every recipe
 
 Individual stages are recipes too (`just solinas`, `just completeness`,
 `just mid-ladder`, …). `just analysis` requires **Python 3.11+** (the declared
-floor — CI pins 3.11) and `z3` with Python bindings (`pip install z3-solver`, or
-`python3 -c "import z3"`). `just pycheck` byte-compiles every analysis script to
-catch version-incompatible syntax against that floor. The Kani harnesses live behind `#[cfg(kani)]` in
+floor — CI pins 3.11) and `z3` with Python bindings, pinned in
+[`requirements.txt`](requirements.txt): `pip install -r analysis/requirements.txt`.
+`just pycheck` byte-compiles every analysis script to catch version-incompatible
+syntax; pass a 3.11 interpreter to reproduce CI's floor check exactly —
+`just PYTHON=python3.11 pycheck`. The Kani harnesses live behind `#[cfg(kani)]` in
 `src/kani_proofs.rs`, so the normal build and `benchmark.sh` never compile them —
 zero effect on the score. Every number is produced by a deterministic run; none
 are hand-asserted.
