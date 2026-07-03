@@ -183,9 +183,10 @@ QROM (`out ^= T[addr]`, single-ancilla-per-level spine), validates it exhaustive
 measures **`2^(w+1)−4` Toffoli / `w` ancilla per read** — e.g. `131,068` Toffoli at
 `w=16` vs the paper's `3·2^16 = 196,608`. So the estimate's `3·2^w` lookup term is
 a **conservative** headline with a validated construction behind it, and the `w`
-ancilla matches `ECDLP_Qubits = PA_Qubits + w`. What is still derived is only the
-end-to-end *composition* of that lookup with the quantum-addend point-add and the
-QFT into the real 28-window ladder (deferred in #4).
+ancilla matches `ECDLP_Qubits = PA_Qubits + w`. That end-to-end *composition* of the
+lookup with the quantum-addend point-add into the real 28-window ladder is now
+emitted and measured (issue #4, ADR 0011/0017 — see §2); only the (Clifford) QFT
+carries no Toffoli.
 
 ### Scope / honesty
 
@@ -241,9 +242,9 @@ circuit (one point addition):
   exactly: Toffoli is additive (`k·PA`), **peak width is flat in `k`** (1152,
   Δ=0 — ancilla reused, validating `ECDLP_Qubits = PA_Qubits + w`), and
   toffoli-depth is **serial** (`k·PA_depth`). So the dominant `28·PA` term rests
-  on measured composition laws; only the `3·2^w` QROM lookup and the (Clifford)
-  QFT remain derived — refining them needs the quantum-addend build, deferred in
-  #4.
+  on measured composition laws; the `3·2^w` QROM lookup was subsequently
+  emitted+measured (ADR 0011) and the quantum-addend build completed (issue #27,
+  ADR 0014/0017); only the (Clifford) QFT carries no Toffoli — see the bullets below.
 - **The full ladder is now stream-emitted and counted end-to-end (issue #4,
   ADR 0011).** `src/point_add/ladder_full.rs` (`#[cfg(test)]`) chains, per window,
   an **emitted** unary-iteration QROM-read op stream with the built point-add op
@@ -289,8 +290,10 @@ circuit (one point addition):
   spine ride on top of the adder — the small-scale ADR 0013). The **field-modular
   reduction tail** is delivered too (`qrom_fed_quantum_addend_modular_add`,
   `acc := (acc + P[k]) mod p` via a Vedral–Barenco–Ekert modular adder, ancilla-clean
-  by simulation). Still open on this testbed: #28's EC exceptional cases (`P==Q`,
-  `dx=0`, ∞), which need the group law on top.
+  by simulation). The EC exceptional cases (`P==Q`, `dx=0`, ∞) are now exactly
+  bounded (issue #28, ADR 0016) and circuit-confirmed as a reversible detector on
+  real coordinates (ADR 0018); what remains — a separate increment — is *handling*
+  them via complete formulas rather than only detecting them.
 - **The true quantum-addend ladder is now multi-window and its read→add
   serialization depth is measured (issue #27 item 2, ADR 0017).**
   `src/point_add/ladder_stream.rs` composes ADR 0014's verified `read→add→unread`
@@ -335,9 +338,11 @@ circuit (one point addition):
   suffices to bound their amplitude — the ∞-accumulator is removed structurally
   (paper's direct-lookup first window) and the residual `dx=0` collisions total
   `≈ 2⁻²⁵⁰` (union bound over 28 additions), >240 bits below Shor's ~1%
-  tolerance. This justifies `completeness_overhead = 1.0`; it is an argument, not
-  a machine-checked proof (equidistribution is heuristic; ∞-removal needs the
-  Tier B ladder). The classical-vs-quantum-addend gap remains, but its cost
+  tolerance. This justifies `completeness_overhead = 1.0`; it is an argument, not a
+  fully machine-checked proof of the whole attack — but the ∞ cases are now removed
+  structurally (ADR 0009) and by offset-window encoding (ADR 0015), and the residual
+  bound is exact (ADR 0016) and circuit-confirmed on real coordinates (ADR 0018). The
+  classical-vs-quantum-addend gap remains, but its cost
   correction is small (only the coordinate steps change; the dominant
   inversion/square are addend-independent).
 - **Adder completeness is now partly measured, not only argued (issue #5,
@@ -396,9 +401,10 @@ circuit (one point addition):
   uncompute modes, plus a secp256k1 256-bit spot-check — that the accumulator ends
   holding a real affine point for every window and is the `(0,0)` ∞ sentinel *iff*
   `w=0` (ancilla clean, phase `+1`; `ctrl=0` leaves it at ∞). So the adder is
-  never fed the amplitude-1 ∞ start. The remaining gap to a full verified attack
-  is the *mid-ladder* residual over the real 28-window superposition, which needs
-  the Tier B ladder (#4).
+  never fed the amplitude-1 ∞ start. The mid-ladder residual over the real 28-window
+  superposition is now addressed too: an exact end-to-end bound (issue #28, ADR 0016)
+  confirmed at the circuit level over real coordinates (ADR 0018), atop the
+  emitted+measured Tier B ladder (#4, ADR 0011/0017).
 
 ---
 
@@ -450,8 +456,9 @@ its arithmetic core is **proven correct over the whole field** (not just 9024
 samples) — at two levels, an abstract-bitvector z3 model (§1a–b) and a
 bit-precise Kani proof bound to the real `alloy` U256 type (§1c) — and its score
 is **anchored to a physical cost model** with explicit assumptions and now a
-**measured** toffoli-depth → runtime → spacetime volume (§2). The remaining gap
-to full scientific rigor is concrete: build the full ECDLP circuit to replace the
-extrapolation multiplier with a measured count. A stretch goal is symbolic
+**measured** toffoli-depth → runtime → spacetime volume (§2). The full ECDLP ladder
+is now stream-emitted and measured end-to-end (`ladder_full.rs` → `ladder_measured.json`,
+consumed by `ecdlp_estimate.py`), so the derived headline is corroborated by a
+measured count. A remaining stretch goal is symbolic
 execution of the emitted op-stream on computational-basis inputs to prove the
 *composed* point-add end-to-end.
