@@ -20,8 +20,10 @@ affine adder) on negligibility arguments. We contribute a *verified, reproducibl
 estimate of the point-addition primitive: (i) the load-bearing Solinas modular
 arithmetic proved over all inputs with z3 and re-proved with bit-precise bounded
 model checking bound to the production 256-bit integer type; (ii) an exactly
-computed, circuit-verified treatment of the affine adder's exceptional cases; and
-(iii) an emitted-and-measured (not only derived) full-ladder cost. The optimized
+computed, circuit-verified treatment of the affine adder's exceptional cases,
+**demonstrated end-to-end by a toy-scale discrete-log recovery** that runs the full
+Shor-ECDLP with the incomplete adder and this handling; and (iii) an
+emitted-and-measured (not only derived) full-ladder cost. The optimized
 primitive costs `1.36M` Toffoli × `1152` qubits — under both published
 point-addition bounds — and the whole pipeline is byte-reproducible.
 
@@ -36,7 +38,8 @@ point-addition bounds — and the whole pipeline is byte-reproducible.
   3. emitted-and-measured full-ladder cost;
   4. a fully reproducible open pipeline.
 - Explicit non-claims: not a new algorithm; not the qubit frontier; a verified
-  primitive + derived/measured ladder, not a demonstrated attack.
+  primitive + derived/measured ladder + a discrete-log recovery **demonstrated at toy
+  scale** (exact statevector), not an executed 256-bit attack.
 
 ## 2. Background & related work
 - Shor-ECDLP, windowed double-and-add, the affine chord/tangent addition and its
@@ -82,6 +85,12 @@ point-addition bounds — and the whole pipeline is byte-reproducible.
   (`dx=0` as x-equality + ∞-sentinel tests) matches the scalar/dlog predicate on the
   whole group of several prime-order toy curves. → the negligibility argument is now
   simulation-backed at every step.
+- **Demonstrated recovery (the payload, ADR 0019)**: the full two-register Shor-ECDLP,
+  run by exact statevector simulation on toy prime-order curves *with the incomplete
+  adder + this handling*, **recovers the secret discrete log** — complete adder
+  `P_success=(n−1)/n`, offset+incomplete recovers `m`, standard encoding's zero-window
+  ∞ collapses recovery. The completeness argument ends in a recovered secret, and the
+  offset encoding is shown load-bearing for the *attack*, not only the amplitude bound.
 
 ## 6. From per-addition to full ECDLP (measured, not only derived)
 - Windowed ladder composition; unary-iteration QROM lookup measured at `2^(w+1)−4`

@@ -3,8 +3,9 @@
 Draft materials assessing and (if pursued) writing up the scientific contribution
 of this repository. **Working documents, not a finished paper.** All quantitative
 claims trace to deterministic runs of the code (`just analysis`); the framing is
-deliberately honest about scope (a verified *cost estimate* + rigor layer, not a
-demonstrated attack, and not the qubit frontier).
+deliberately honest about scope (a verified *cost estimate* + rigor layer whose
+pipeline is demonstrated to recover the discrete log **at toy scale**, not an
+executed 256-bit attack, and not the qubit frontier).
 
 | File | What it is |
 |---|---|

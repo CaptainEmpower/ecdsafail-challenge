@@ -4,7 +4,8 @@
 This report accompanies the `CaptainEmpower/ecdsafail-challenge` repository; every
 number below is produced by a deterministic run of the code it describes (see
 §Reproducibility). It is a *cost estimate with a machine-checked correctness and a
-simulation-backed completeness layer*, not a demonstrated end-to-end attack.
+simulation-backed completeness layer* (whose pipeline is demonstrated to recover the
+discrete log **at toy scale**), not an executed 256-bit attack.
 
 ## Abstract
 
@@ -21,9 +22,12 @@ point-addition bounds — and composes to a measured full-ECDLP cost of **~46M
 Toffoli / 1168 qubits**. The load-bearing modular arithmetic is proved over all
 inputs (z3) and re-proved with bit-precise bounded model checking bound to the
 production 256-bit integer type (Kani); the affine adder's exceptional cases are
-bounded exactly on the real 28-window ladder and confirmed by a reversible detector
-over real coordinates. We position this as a *rigor and reproducibility*
-contribution orthogonal to the algorithmic frontier, not a smaller estimate.
+bounded exactly on the real 28-window ladder, confirmed by a reversible detector
+over real coordinates, and — the payload — shown sufficient by a **demonstrated
+end-to-end discrete-log recovery at toy scale** (exact statevector Shor-ECDLP that
+recovers the secret using the incomplete adder + this handling). We position this as
+a *rigor and reproducibility* contribution orthogonal to the algorithmic frontier,
+not a smaller estimate.
 
 ## 1. Result summary (measured)
 
@@ -52,13 +56,18 @@ is under **both**.
    negation. The same control flow is re-proved with **Kani** bit-precise bounded
    model checking on the real `alloy_primitives::U256` type against the true
    secp256k1 prime — binding the proof to the code, not a model.
-2. **Completeness: computed and circuit-verified, not argued.** The incomplete
-   affine adder's exceptional cases are (a) measured on crafted inputs; (b) removed
-   structurally where amplitude-1 (∞-start via direct-lookup; zero-window ∞ via an
-   offset encoding); (c) **bounded exactly** end-to-end on the real 28-window
-   two-scalar ladder; and (d) confirmed by a **reversible detector on real (x,y)
+2. **Completeness: computed, circuit-verified, and demonstrated — not argued.** The
+   incomplete affine adder's exceptional cases are (a) measured on crafted inputs;
+   (b) removed structurally where amplitude-1 (∞-start via direct-lookup; zero-window
+   ∞ via an offset encoding); (c) **bounded exactly** end-to-end on the real 28-window
+   two-scalar ladder; (d) confirmed by a **reversible detector on real (x,y)
    coordinates** matching the scalar/dlog predicate on the whole group of several
-   prime-order toy curves.
+   prime-order toy curves; and (e) **demonstrated end-to-end**: the full two-register
+   Shor-ECDLP, run by exact statevector simulation on toy prime-order curves with the
+   incomplete adder + this handling, **recovers the secret discrete log** (complete
+   adder `P_success=(n−1)/n`; offset+incomplete recovers `m`; standard encoding's
+   zero-window ∞ collapses recovery — so the handling is load-bearing for the attack,
+   not only the amplitude bound).
 3. **Emitted-and-measured full-ladder cost.** The full ladder is stream-emitted and
    counted (no materialization), and the measured totals are consumed by the
    estimate — corroborating the derived headline and measuring the read→add
@@ -75,9 +84,10 @@ is under **both**.
 - Completeness: `analysis/completeness_argument.md`,
   `verify/{completeness_collision_rate,direct_lookup_init,offset_window_encoding,mid_ladder_bound}.py`,
   `src/point_add/ec_exceptional.rs`.
+- Demonstrated attack (toy-scale recovery): `analysis/verify/shor_ecdlp_recovery.py`.
 - Full-ladder measurement: `src/point_add/{ladder_full,ladder_stream}.rs`,
   `analysis/ladder_measured.json`, `analysis/ecdlp_estimate.py`.
-- Design rationale: `analysis/adr/` (ADRs 0001–0018), `analysis/scientific-value.md`.
+- Design rationale: `analysis/adr/` (ADRs 0001–0021), `analysis/scientific-value.md`.
 
 ## 4. Reproducibility
 
@@ -85,7 +95,8 @@ is under **both**.
 just build      # -> ops.bin  (SHA-256 pinned; byte-identical)
 just score      # -> score.json  (9024-shot correctness/reversibility/phase scoring)
 just depth      # -> depth.json
-just analysis   # 11-stage suite: z3 proofs + completeness + cost model + estimate
+just analysis   # 12-stage suite: z3 proofs + completeness + toy-attack recovery + cost model + estimate
+just recover    # end-to-end Shor-ECDLP dlog recovery on toy curves (ADR 0019)
 just kani       # bit-precise proofs on the real alloy U256 type
 ```
 
@@ -105,8 +116,11 @@ SHA-256); all reported numbers follow deterministically.
 - Toffoli×qubits is a competition figure of merit; the physical cost model is a
   coarse upper bound (above the source paper's optimized `<500k` physical qubits).
 - Completeness is a rigorous **simulation-backed argument** (exact bound + circuit
-  confirmation at every component), not a single formal machine-checked proof of the
-  whole 256-bit attack; toy-curve exhaustiveness + closed-form scale-up.
+  confirmation at every component + a **demonstrated discrete-log recovery**), not a
+  single formal machine-checked proof of the whole 256-bit attack. The recovery is at
+  **toy scale** (exact statevector on curves of order 19/29/41); the 256-bit attack
+  remains a derived/measured cost estimate, bridged by toy-curve exhaustiveness +
+  closed-form scale-up, not an executed run.
 
 ## 6. Related work
 
