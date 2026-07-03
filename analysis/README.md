@@ -27,16 +27,22 @@ nothing here can affect the circuit or the score.
 
 ## Run everything
 
+Recipes live in the repo-root [`justfile`](../justfile) (`just` — the command
+runner — replaces the old `analysis/run.sh`):
+
 ```bash
-cargo run --release --bin depth_report   # measure depth -> depth.json (needs ops.bin)
-bash analysis/run.sh                      # z3 proofs + cost model (needs python3 + z3)
-bash analysis/verify/run_kani.sh          # Kani proofs on real Rust types (needs cargo kani)
+just depth       # measure depth -> depth.json (needs ops.bin)
+just analysis    # z3 proofs + cost model, 11 stages (needs python3 + z3)
+just kani        # Kani proofs on real Rust types (needs cargo kani)
+just             # list every recipe
 ```
 
-`analysis/run.sh` requires `z3` with Python bindings (`python3 -c "import z3"`).
-The Kani harnesses live behind `#[cfg(kani)]` in `src/kani_proofs.rs`, so the
-normal build and `benchmark.sh` never compile them — zero effect on the score.
-Every number is produced by a deterministic run; none are hand-asserted.
+Individual stages are recipes too (`just solinas`, `just completeness`,
+`just mid-ladder`, …). `just analysis` requires `z3` with Python bindings
+(`python3 -c "import z3"`). The Kani harnesses live behind `#[cfg(kani)]` in
+`src/kani_proofs.rs`, so the normal build and `benchmark.sh` never compile them —
+zero effect on the score. Every number is produced by a deterministic run; none
+are hand-asserted.
 
 ## Two-layer verification (why both z3 and Kani)
 
