@@ -333,6 +333,14 @@ circuit (one point addition):
   `addend=∞` rate is then **exactly 0** and `dx=0` is unchanged, so the completeness
   headline sharpens from `~2⁻¹¹` back to the `dx=0`-limited `~2⁻²⁵⁰` under an
   explicit, validated encoding condition rather than a silent assumption.
+- **The completeness headline is now an *exact* end-to-end bound, not just a union
+  bound (issue #28, ADR 0016).** `verify/mid_ladder_bound.py` computes the exact
+  `P[≥1 exceptional across the real 28-window two-scalar ladder]` by tracking the
+  accumulator's clean (never-yet-exceptional) mass through the whole run — the exact
+  `P[⋃_k A_k]`, which it verifies is `≤` the completeness argument's union bound on
+  every config (and `exact + survival == 1` exactly, so no mass is lost). At attack
+  parameters this is `≈2⁻²⁵⁰` (offset) / `≈2⁻¹¹` (standard) — both `≪` Shor's `~1%`,
+  now as the exact ladder amplitude rather than merely an upper bound.
 - **The amplitude-1 ∞ start is now circuit-demonstrated as removed (issue #5
   part (a), ADR 0009).** The one exceptional case that negligibility *cannot*
   cover — the accumulator starting at ∞ with amplitude 1 — is handled structurally

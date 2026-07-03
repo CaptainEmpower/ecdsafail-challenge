@@ -23,3 +23,4 @@ Format: Status · Context · Decision · Consequences (lightweight MADR).
 | [0013](0013-quantum-addend-width-gap.md) | The quantum-addend WIDTH gap is real: A2's `+w` undercounts this PA (Tier B, issue #27) | Accepted (measured port needs PA+256..512+w; functional QROM-fed add remains) |
 | [0014](0014-quantum-addend-testbed.md) | Quantum-addend point-add testbed: a QROM-fed add, verified by simulation (Tier B, issue #27/#28) | Accepted (v1: QROM read→q-q add→unread sim-verified; modular/EC-exception next) |
 | [0015](0015-offset-window-encoding.md) | Offset window encoding removes the zero-window ∞ exceptional term | Accepted (dominant ∞ term removed structurally; bound sharpened to ~2⁻²⁵⁰) |
+| [0016](0016-exact-mid-ladder-bound.md) | Exact end-to-end bound on the mid-ladder exceptional amplitude | Accepted (exact <= union, <<1% at attack scale; circuit demo rides on #27) |

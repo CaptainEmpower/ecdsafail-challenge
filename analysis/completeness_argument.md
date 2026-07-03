@@ -102,6 +102,16 @@ union bound the **total** exceptional amplitude across the whole run is
 — over 240 bits of margin. Doubling (`A == M`) and `P=−Q` (`A == −M`) are the two
 sub-cases and are already included in the `A ∈ {M,−M}` count.
 
+> **The union bound above is confirmed by an exact end-to-end computation**
+> (issue #28, [ADR 0016](adr/0016-exact-mid-ladder-bound.md)).
+> `verify/mid_ladder_bound.py` computes the exact `P[⋃_k A_k]` — the probability
+> that *any* addition is exceptional across the real two-scalar ladder — by
+> tracking the accumulator's clean (never-yet-exceptional) mass through the whole
+> run. On every toy config the exact amplitude is `≤` this union bound and, at
+> attack parameters, `≈ 2⁻²⁵⁰` under the offset encoding (`≈ 2⁻¹¹` if the
+> zero-window `∞` term is not removed) — so the `≪ 10⁻²` headline holds not only
+> as an upper bound but as the exact ladder amplitude.
+
 ## 5. Conclusion
 
 Combining §3 and §4: after the direct-lookup first window removes the amplitude-1
