@@ -1,0 +1,24 @@
+# Dependency manifest for the analysis/ scientific-rigor suite (`just analysis`).
+#
+# This is a *virtual* uv project: `package = false` means uv only resolves and
+# installs the dependencies into a locked virtualenv — it never tries to build or
+# install this repo as a Python package (the analysis code is run as scripts, not
+# imported as a library). The committed `uv.lock` pins the whole dependency tree
+# with hashes, giving the Python side the same reproducibility the Rust build and
+# the ADR trail give the rest of the repo.
+#
+#   uv sync --locked        # create .venv from the lock (exact, hash-verified)
+#   uv run just analysis    # run the suite with the locked interpreter + z3
+#
+# `analysis/requirements.txt` is kept as a pip fallback and mirrors this manifest.
+[project]
+name = "ecdsafail-analysis"
+version = "0"
+description = "Scientific-rigor analysis suite for the ecdsafail-challenge circuit"
+requires-python = ">=3.11"
+dependencies = [
+    "z3-solver==4.16.0",
+]
+
+[tool.uv]
+package = false

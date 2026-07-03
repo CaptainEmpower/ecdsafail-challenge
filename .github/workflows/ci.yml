@@ -61,18 +61,21 @@ jobs:
       - name: Install pinned toolchain
         run: rustup toolchain install 1.93.0 --profile minimal
       - uses: Swatinem/rust-cache@v2
-      # Pin Python to the declared 3.11 floor (the analysis suite is kept runnable
-      # on 3.11+; a floating runner default is how a 3.12-only f-string once slipped
-      # through). z3 comes from pip (z3-solver) so it binds to THIS interpreter, not
-      # the apt system python.
-      - name: Pin Python to the 3.11 floor
-        uses: actions/setup-python@v5
+      # The analysis env is managed by uv: `uv sync --locked` builds a virtualenv
+      # from the committed uv.lock (transitively hash-pinned z3-solver) on the
+      # Python pinned by .python-version (3.11 — the declared floor; a floating
+      # runner default is how a 3.12-only f-string once slipped through). This gives
+      # the Python side the same reproducibility as the locked Rust build. Every
+      # later python invocation goes through `uv run` so it uses this locked venv.
+      - name: Install uv (pinned)
+        uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
-      - name: Install z3 for the analysis proofs (pinned)
-        run: python -m pip install -r analysis/requirements.txt
+          version: "0.8.17"
+          enable-cache: true
+      - name: Sync the locked analysis env (z3, hash-verified; Python 3.11 floor)
+        run: uv sync --locked
       - name: Guard — all analysis python compiles on the 3.11 floor
-        run: python -m compileall -q analysis
+        run: uv run python -m compileall -q analysis
       - name: Fetch crates (so the offline benchmark build succeeds)
         run: cargo fetch --locked
       - name: Build + score the circuit (benchmark.sh -> ops.bin, score.json)
@@ -85,8 +88,10 @@ jobs:
         run: cargo run --release --locked --bin depth_report
       - name: Install just (task runner)
         uses: extractions/setup-just@v2
-      - name: Run the scientific-rigor suite (just analysis)
-        run: just analysis
+      - name: Run the scientific-rigor suite (uv run just analysis)
+        # `uv run` puts the locked venv on PATH, so each recipe's `python3` resolves
+        # to the hash-pinned interpreter with z3 — not the runner's system python.
+        run: uv run just analysis
       - name: Upload score + depth artifacts
         if: always()
         uses: actions/upload-artifact@v7

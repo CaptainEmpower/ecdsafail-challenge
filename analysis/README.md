@@ -32,19 +32,24 @@ Recipes live in the repo-root [`justfile`](../justfile) (`just` — the command
 runner — replaces the old `analysis/run.sh`):
 
 ```bash
-just depth       # measure depth -> depth.json (needs ops.bin)
-just analysis    # z3 proofs + cost model, 12 stages (needs python3 + z3)
-just kani        # Kani proofs on real Rust types (needs cargo kani)
-just             # list every recipe
+uv sync --locked      # build the locked analysis env (z3, Python 3.11 floor)
+uv run just analysis  # z3 proofs + cost model, 12 stages, on the locked venv
+uv run just depth     # measure depth -> depth.json (needs ops.bin)
+uv run just kani      # Kani proofs on real Rust types (needs cargo kani)
+just                  # list every recipe
 ```
 
-Individual stages are recipes too (`just solinas`, `just completeness`,
-`just mid-ladder`, `just recover`, …). `just analysis` requires **Python 3.11+** (the declared
-floor — CI pins 3.11) and `z3` with Python bindings, pinned in
-[`requirements.txt`](requirements.txt): `pip install -r analysis/requirements.txt`.
-`just pycheck` byte-compiles every analysis script to catch version-incompatible
-syntax; pass a 3.11 interpreter to reproduce CI's floor check exactly —
-`just PYTHON=python3.11 pycheck`. The Kani harnesses live behind `#[cfg(kani)]` in
+The Python env is **managed by uv** ([`../pyproject.toml`](../pyproject.toml) +
+[`../uv.lock`](../uv.lock), transitively hash-pinned — the same reproducibility the
+Rust build and ADR trail give the rest of the repo). `uv sync --locked` builds
+`.venv` from the lock on the **Python 3.11 floor** (pinned by `../.python-version`),
+and `uv run …` puts that venv on `PATH` so each recipe's `python3` uses the locked
+z3. Individual stages are recipes too (`just solinas`, `just completeness`,
+`just mid-ladder`, `just recover`, …). Without uv, a bare-pip fallback mirrors the
+lock: `pip install -r analysis/requirements.txt` (Python 3.11+). `just pycheck`
+byte-compiles every analysis script to catch version-incompatible syntax; reproduce
+CI's floor check exactly with `uv run just pycheck` (or `just PYTHON=python3.11
+pycheck`). The Kani harnesses live behind `#[cfg(kani)]` in
 `src/kani_proofs.rs`, so the normal build and `benchmark.sh` never compile them —
 zero effect on the score. Every number is produced by a deterministic run; none
 are hand-asserted.

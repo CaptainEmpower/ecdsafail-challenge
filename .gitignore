@@ -8,3 +8,6 @@ depth.json
 docs/*.pdf
 /original
 __pycache__/
+
+# uv-managed virtualenv (created by `uv sync`)
+.venv/
