@@ -95,17 +95,21 @@ fn replay(circ: &mut B, ops: &[Op], reverse: bool) {
 /// returning its result register), copy the result into `out`, then uncompute the
 /// forward fragment. `out` must be |0>; all scratch and the result register are
 /// returned to |0>; prior ops on `circ` are preserved.
+///
+/// Composable: only the gadget's *own* forward fragment (`circ.ops[start..]`) is
+/// captured and reversed — prior ops are left untouched (no `take_ops`/replay of the
+/// whole circuit), so the surrounding circuit may contain any op kind. This is the
+/// nesting-safe `emit_inverse`-style pattern (direct `circ.ops` access is available
+/// to this child module of `point_add`).
 fn emit_gadget(circ: &mut B, out: &[QubitId], build: impl FnOnce(&mut B) -> Vec<QubitId>) {
-    let prior = circ.take_ops();
-    let res = build(circ);
-    let fwd = circ.take_ops();
+    let start = circ.ops.len();
+    let res = build(circ); // forward ops appended
     assert_eq!(res.len(), out.len(), "gadget result width != out width");
-    replay(circ, &prior, false);
-    replay(circ, &fwd, false);
+    let fwd: Vec<Op> = circ.ops[start..].to_vec(); // capture BEFORE the copy ops
     for (i, &q) in out.iter().enumerate() {
-        circ.cx(res[i], q);
+        circ.cx(res[i], q); // copy result out (not part of the fragment to reverse)
     }
-    replay(circ, &fwd, true);
+    replay(circ, &fwd, true); // uncompute the forward fragment only
 }
 
 // ── shared modular-add scratch (each mod_add returns it to |0>) ──────────────
@@ -133,6 +137,7 @@ impl Anc {
 }
 
 fn copy_reg(circ: &mut B, src: &[QubitId], dst: &[QubitId]) {
+    assert_eq!(src.len(), dst.len(), "copy_reg width mismatch");
     for (s, d) in src.iter().zip(dst) {
         circ.cx(*s, *d);
     }
@@ -150,6 +155,8 @@ fn mod_mul_fwd(
     n: usize,
     anc: &Anc,
 ) -> Vec<QubitId> {
+    assert_eq!(x.len(), n, "mod_mul_fwd: x width != n");
+    assert_eq!(y.len(), n, "mod_mul_fwd: y width != n");
     let z = circ.alloc_qubits(n);
     // doubling chain: t[0] = y, t[i] = 2·t[i-1] mod p.
     let mut t: Vec<Vec<QubitId>> = Vec::with_capacity(n);
@@ -178,6 +185,7 @@ fn mod_mul_fwd(
 /// register (returned); `a` preserved; scratch dirty. Left-to-right binary
 /// exponentiation over the classical exponent `e = p-2`.
 fn mod_inv_fwd(circ: &mut B, a: &[QubitId], p: u64, n: usize, anc: &Anc) -> Vec<QubitId> {
+    assert_eq!(a.len(), n, "mod_inv_fwd: a width != n");
     let e = p - 2;
     assert!(e >= 1, "toy field needs p >= 3");
     let msb = 63 - e.leading_zeros(); // top set bit of e (e >= 1)
@@ -203,6 +211,9 @@ pub(super) fn emit_mod_mul(
     p: u64,
     n: usize,
 ) {
+    assert_eq!(x.len(), n, "emit_mod_mul: x width != n");
+    assert_eq!(y.len(), n, "emit_mod_mul: y width != n");
+    assert_eq!(out.len(), n, "emit_mod_mul: out width != n");
     emit_gadget(circ, out, |c| {
         let anc = Anc::alloc(c, n);
         mod_mul_fwd(c, x, y, p, n, &anc)
@@ -211,6 +222,8 @@ pub(super) fn emit_mod_mul(
 
 /// `out ^= a^{-1} mod p` (`0` for `a=0`); `out` |0>, `a` preserved, all scratch |0>.
 pub(super) fn emit_mod_inv(circ: &mut B, a: &[QubitId], out: &[QubitId], p: u64, n: usize) {
+    assert_eq!(a.len(), n, "emit_mod_inv: a width != n");
+    assert_eq!(out.len(), n, "emit_mod_inv: out width != n");
     emit_gadget(circ, out, |c| {
         let anc = Anc::alloc(c, n);
         mod_inv_fwd(c, a, p, n, &anc)
@@ -247,8 +260,8 @@ fn toy_mod_mul_is_field_multiply() {
     eprintln!("\n=== Path B (ADR 0020): reversible toy modular multiply over F_p ===");
     for &p in &[5u64, 7, 11, 13, 17, 19, 23] {
         let n = width_for(p);
-        // one instance emits out ^= (x*y) mod p; sweep x across shots at a few fixed y.
-        for &yval in &[1u64, 2, p - 1, (p - 1) / 2] {
+        // out ^= (x*y) mod p: sweep x across shots, y over ALL of F_p -> full F_p×F_p.
+        for yval in 0..p {
             let mut circ = B::new_for_test();
             let x = circ.alloc_qubits(n);
             let y = circ.alloc_qubits(n);

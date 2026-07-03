@@ -31,7 +31,14 @@ Build a **reversible toy-width modular inverse** as a `#[cfg(test)]` harness in 
    registers a handful of bits wide, so verification is **exhaustive** over the whole
    field — the same reduced-width justification as ADR 0014/0016/0018.
 2. **Reversible modular inverse** `inv(a) = a^{-1} mod p` for `a ≠ 0`, built entirely
-   from the repo's validated primitives, verified exhaustively.
+   from the repo's validated primitives, verified exhaustively. **Design target /
+   requirement (width-faithful):** a **Kaliski / EEA-style** reversible almost-inverse
+   with a bounded iteration count — the space-optimal construction (Roetteler et al.)
+   and the one a scored 256-bit inverse would use. It is the intended approach behind
+   the `emit_mod_inv` interface; the toy harness may realize the same interface by a
+   simpler route (see *As built*) since at toy width space cost is irrelevant and
+   exhaustive verification is the priority. A future width-faithful increment swaps in
+   the Kaliski/EEA body behind the unchanged interface.
 3. **`inv(0)` well-defined** (the exceptional value): the circuit produces `inv(0)=0`
    (the convention ADR 0019 models classically), so the λ-division adder (ADR 0021) can
    branch on it to *handle* the `dx=0` exception rather than misfire.
@@ -41,7 +48,9 @@ Build a **reversible toy-width modular inverse** as a `#[cfg(test)]` harness in 
 
 ## As built (implementation reality)
 
-**Fermat, not Kaliski.** The inverse is realized as `a^{p-2} mod p` by left-to-right
+**Fermat harness for the toy width (the Kaliski/EEA design target of §Decision.2
+stands for width-faithful use).** The inverse is realized as `a^{p-2} mod p` by
+left-to-right
 square-and-multiply over the fixed classical exponent `p-2`, using a from-scratch
 reversible **modular multiply** (`mod_mul`, schoolbook double-and-add) built on the
 validated VBE modular adder (`qaddend_testbed::mod_add`, ADR 0014). Kaliski/EEA is the
