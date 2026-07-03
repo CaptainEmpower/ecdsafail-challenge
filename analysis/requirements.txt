@@ -1,4 +1,7 @@
-# Pinned dependencies for the analysis/ scientific-rigor suite (just analysis).
-# CI installs these on the pinned Python 3.11 floor; pin exact versions so the
-# validation environment is reproducible across runs.
+# Pip fallback for the analysis/ scientific-rigor suite (just analysis).
+#
+# The AUTHORITATIVE, reproducible source is uv: ../pyproject.toml + ../uv.lock
+# (transitively hash-pinned). CI uses `uv sync --locked`. This file mirrors that
+# top-level pin for anyone using bare pip on the Python 3.11 floor; keep it in
+# sync with pyproject.toml.
 z3-solver==4.16.0

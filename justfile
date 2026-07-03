@@ -6,10 +6,16 @@
 #
 # Analysis stages run from the analysis/ directory (as the Python scripts expect).
 #
-# PYTHON selects the interpreter for every python recipe. CI pins the 3.11 floor;
-# to reproduce it locally (e.g. the pycheck syntax guard) run against 3.11:
+# Python env: managed by uv (pyproject.toml + uv.lock, transitively hash-pinned).
+# The reproducible way to run the suite is through the locked virtualenv:
+#   uv sync --locked          # build .venv from uv.lock (z3, Python 3.11 floor)
+#   uv run just analysis      # recipes' `python3` resolves to the locked venv
+# `analysis/requirements.txt` is a pip fallback that mirrors uv.lock.
+#
+# PYTHON selects the interpreter for every python recipe (default `python3`, which
+# under `uv run` is the locked venv). CI pins the 3.11 floor; to reproduce the
+# pycheck syntax guard against 3.11 without uv:
 #   just PYTHON=python3.11 pycheck
-#   just PYTHON=python3.11 analysis
 PYTHON := "python3"
 
 # List available recipes.
