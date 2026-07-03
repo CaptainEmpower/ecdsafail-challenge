@@ -146,3 +146,35 @@ pub(crate) fn square_row_window_measured_carry_clear_enabled() -> bool {
         .as_deref()
         == Some("1")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_direction_parses_known_aliases() {
+        for s in ["f", "forward", "false", "0"] {
+            assert_eq!(square_cleanup_direction(s), Some(false), "{s}");
+        }
+        for s in ["r", "reverse", "true", "1", "R", " Reverse "] {
+            assert_eq!(square_cleanup_direction(s), Some(true), "{s}");
+        }
+        assert_eq!(square_cleanup_direction("nonsense"), None);
+        assert_eq!(square_cleanup_direction(""), None);
+    }
+
+    #[test]
+    fn disjoint_assert_accepts_disjoint_slices() {
+        let a = [QubitId(0), QubitId(2)];
+        let b = [QubitId(1), QubitId(3)];
+        assert_qubit_slices_disjoint(&[&a, &b]); // must not panic
+    }
+
+    #[test]
+    #[should_panic(expected = "aliases an operand")]
+    fn disjoint_assert_rejects_aliasing_slices() {
+        let a = [QubitId(0), QubitId(1)];
+        let b = [QubitId(1), QubitId(2)]; // q1 shared
+        assert_qubit_slices_disjoint(&[&a, &b]);
+    }
+}

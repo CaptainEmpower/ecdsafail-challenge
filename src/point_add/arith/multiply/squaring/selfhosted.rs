@@ -201,3 +201,81 @@ struct Round84AggregateFold {
     correction_wrap_owned: bool,
     product: Option<Vec<QubitId>>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::Simulator;
+    use sha3::{
+        digest::{ExtendableOutput, Update, XofReader},
+        Shake128,
+    };
+
+    fn get<R: XofReader>(sim: &Simulator<'_, R>, qs: &[QubitId], shot: usize) -> u64 {
+        let mut v = 0u64;
+        for (i, &q) in qs.iter().enumerate() {
+            v |= ((sim.qubit(q) >> shot) & 1) << i;
+        }
+        v
+    }
+
+    /// The selfhosted low-qubit square writes `x²` into a zero `tmp_ext`, leaving
+    /// `x` unchanged, and its inverse unwrites it back to |0>. Exhaustive over all
+    /// n=4 inputs, with every internal ancilla returned to |0> and phase +1.
+    #[test]
+    fn selfhosted_square_forward_computes_x_squared_and_inverse_uncomputes() {
+        const N: usize = 4;
+        let mut b = B::new();
+        let x = b.alloc_qubits(N);
+        let tmp = b.alloc_qubits(2 * N);
+        schoolbook_square_symmetric_lowq_selfhosted(&mut b, &x, &tmp);
+        let fwd_len = b.ops.len();
+        schoolbook_square_symmetric_lowq_selfhosted_inverse(&mut b, &x, &tmp);
+        let nq = b.next_qubit as usize;
+        let nb = b.next_bit as usize;
+        let inputs: std::collections::HashSet<u64> =
+            x.iter().chain(tmp.iter()).map(|q| q.0).collect();
+
+        let load = |sim: &mut Simulator<'_, _>| {
+            for shot in 0..(1 << N) {
+                for (i, &q) in x.iter().enumerate() {
+                    if (shot >> i) & 1 != 0 {
+                        *sim.qubit_mut(q) |= 1u64 << shot;
+                    }
+                }
+            }
+        };
+
+        // (a) forward only: tmp == x², x unchanged, phase clean.
+        let mut s1 = Shake128::default();
+        s1.update(b"selfhost-sq-fwd-n4");
+        let mut xof1 = s1.finalize_xof();
+        let mut sim = Simulator::new(nq, nb, &mut xof1);
+        load(&mut sim);
+        sim.apply_iter(b.ops[..fwd_len].iter());
+        assert_eq!(sim.phase, 0, "forward phase garbage");
+        for shot in 0..(1 << N) {
+            let xv = shot as u64;
+            assert_eq!(get(&sim, &tmp, shot), xv * xv, "x={xv}: tmp != x^2");
+            assert_eq!(get(&sim, &x, shot), xv, "x={xv} changed by forward");
+        }
+
+        // (b) forward + inverse: identity — tmp back to |0>, all ancilla clean.
+        let mut s2 = Shake128::default();
+        s2.update(b"selfhost-sq-rt-n4");
+        let mut xof2 = s2.finalize_xof();
+        let mut sim2 = Simulator::new(nq, nb, &mut xof2);
+        load(&mut sim2);
+        sim2.apply_iter(b.ops.iter());
+        assert_eq!(sim2.phase, 0, "roundtrip phase garbage");
+        for shot in 0..(1 << N) {
+            assert_eq!(get(&sim2, &tmp, shot), 0, "tmp not uncomputed by inverse");
+            assert_eq!(get(&sim2, &x, shot), shot as u64, "x changed by roundtrip");
+        }
+        for q in 0..nq as u64 {
+            if !inputs.contains(&q) {
+                assert_eq!(sim2.qubit(QubitId(q)), 0, "ancilla q{q} not clean");
+            }
+        }
+    }
+}

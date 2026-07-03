@@ -279,3 +279,104 @@ pub(crate) fn square_row_windowed_apply(
     }
     b.free(first_carry);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::Simulator;
+    use sha3::{
+        digest::{ExtendableOutput, Update, XofReader},
+        Shake128,
+    };
+
+    fn get<R: XofReader>(sim: &Simulator<'_, R>, qs: &[QubitId], shot: usize) -> u64 {
+        let mut v = 0u64;
+        for (i, &q) in qs.iter().enumerate() {
+            v |= ((sim.qubit(q) >> shot) & 1) << i;
+        }
+        v
+    }
+
+    /// Classical value of square row `i`: bit 0 = x_i, bit 1 = 0 (gap),
+    /// bit 2+k = x_i & x_{i+1+k}. Mirrors `square_row_bit_set`.
+    fn row_value(x: u64, i: usize, n: usize) -> u64 {
+        let xi = (x >> i) & 1;
+        let mut r = xi; // bit 0
+        for k in 0..n.saturating_sub(i + 1) {
+            let cross = xi & ((x >> (i + 1 + k)) & 1);
+            r |= cross << (2 + k);
+        }
+        r
+    }
+
+    /// `square_row_windowed_apply` is a value-exact, self-inverse windowed add of
+    /// square row `i` into `tmp_ext[2i..]`. Driven directly (no env knob) on the
+    /// low row i=0, which has ample clean tail in `tmp_ext` for the borrowed carry
+    /// lane. Exhaustive over all n=6 inputs: forward writes the row value, its
+    /// mirror (forward=false) unwrites it to |0>, `x` is untouched, every internal
+    /// ancilla and the borrowed tail return to |0>, phase +1.
+    #[test]
+    fn windowed_row_apply_is_value_exact_and_self_inverse() {
+        const N: usize = 6;
+        const I: usize = 0; // low row: row_top = width+1, clean tail = 2N-(width+1) > 0
+        let width = N - I + 1; // 7 row bits for row 0
+        let windows = 3; // seg widths 2,2,3 -> need <= 3 <= clean tail (2N-8 = 4)
+
+        let mut b = B::new();
+        let x = b.alloc_qubits(N);
+        let tmp = b.alloc_qubits(2 * N);
+        square_row_windowed_apply(&mut b, &x, &tmp, I, width, windows, true);
+        let fwd_len = b.ops.len();
+        square_row_windowed_apply(&mut b, &x, &tmp, I, width, windows, false);
+        let nq = b.next_qubit as usize;
+        let nb = b.next_bit as usize;
+        let inputs: std::collections::HashSet<u64> =
+            x.iter().chain(tmp.iter()).map(|q| q.0).collect();
+
+        let load = |sim: &mut Simulator<'_, _>| {
+            for shot in 0..(1 << N) {
+                for (i, &q) in x.iter().enumerate() {
+                    if (shot >> i) & 1 != 0 {
+                        *sim.qubit_mut(q) |= 1u64 << shot;
+                    }
+                }
+            }
+        };
+
+        // (a) forward only: tmp holds the classical row value, x unchanged.
+        let mut s1 = Shake128::default();
+        s1.update(b"row-windowed-fwd-n6");
+        let mut xof1 = s1.finalize_xof();
+        let mut sim = Simulator::new(nq, nb, &mut xof1);
+        load(&mut sim);
+        sim.apply_iter(b.ops[..fwd_len].iter());
+        assert_eq!(sim.phase, 0, "forward phase garbage");
+        for shot in 0..(1 << N) {
+            let xv = shot as u64;
+            assert_eq!(
+                get(&sim, &tmp, shot),
+                row_value(xv, I, N),
+                "x={xv}: tmp != row value (windowed forward)"
+            );
+            assert_eq!(get(&sim, &x, shot), xv, "x={xv} changed by forward");
+        }
+
+        // (b) forward + mirror: identity — tmp back to |0>, all ancilla clean.
+        let mut s2 = Shake128::default();
+        s2.update(b"row-windowed-rt-n6");
+        let mut xof2 = s2.finalize_xof();
+        let mut sim2 = Simulator::new(nq, nb, &mut xof2);
+        load(&mut sim2);
+        sim2.apply_iter(b.ops.iter());
+        assert_eq!(sim2.phase, 0, "roundtrip phase garbage");
+        for shot in 0..(1 << N) {
+            assert_eq!(get(&sim2, &tmp, shot), 0, "tmp not unwritten by mirror");
+            assert_eq!(get(&sim2, &x, shot), shot as u64, "x changed by roundtrip");
+        }
+        for q in 0..nq as u64 {
+            if !inputs.contains(&q) {
+                assert_eq!(sim2.qubit(QubitId(q)), 0, "ancilla q{q} not clean");
+            }
+        }
+    }
+}
