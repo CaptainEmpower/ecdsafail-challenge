@@ -307,6 +307,16 @@ circuit (one point addition):
   "measured, not assumed" read→add depth #27 asks for is delivered at representative
   width, with a closed-form scale to `w=16`; the materialized 256-bit run (~290 GB)
   stays out of scope per #27.
+- **The full-ladder resources are now a measured output in the estimate (issue #27
+  item 3, ADR 0017).** `ladder_full.rs` emits its streamed w=16 totals to
+  `analysis/ladder_measured.json` (Toffoli `47.8M` reversible / `46.0M` MBUC,
+  toffoli-depth `30.16M`, peak `1168`), and `analysis/ecdlp_estimate.py` **consumes**
+  it — printing a dedicated *measured* full-ladder section alongside its derived
+  headline and cross-asserting `measured_mbuc == (PA+3·2^w)·n_add − 6·n_add` on the
+  artifact's static op-stream PA basis (kept distinct from the executed avg-per-shot
+  headline). So the estimate's old "numbers are derived, not emitted+measured" caveat
+  is retired: the headline is derived, and the full ladder is *also* emitted+measured
+  end-to-end.
 
 **Key limitations this surfaces** (all real, all worth fixing):
 - The scored "qubits" is `max_id + 1` (total allocated ids), **not peak

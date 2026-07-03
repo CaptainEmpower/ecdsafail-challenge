@@ -87,9 +87,18 @@ unread), reusing ADR 0014's verified `qrom_read` / `mod_add` fragments. Two face
   scale to `w=16`. The full-width materialized ladder (~290 GB) is explicitly out of
   scope per #27. Issue #28's EC exceptional cases (`P==Q`, `dx=0`, ∞) still need the
   group law on top of this substrate and remain a separate increment.
-- **Item 3 (optional).** Emitting the streamed totals to a JSON artifact for
-  `ecdlp_estimate.py` to consume alongside its closed-form headline is a small
-  follow-up, deferred to keep this increment focused.
+- **Item 3 (delivered).** The full-ladder resources are now a *measured* output,
+  not only derived: `ladder_full.rs` emits its streamed w=16 totals (Toffoli
+  reversible/MBUC, toffoli-depth, peak) to `analysis/ladder_measured.json`
+  (env-gated write; deterministic; regeneration command in the file's provenance),
+  and `analysis/ecdlp_estimate.py` **consumes** it — printing the measured streamed
+  full-ladder totals in a dedicated section alongside its closed-form headline and
+  cross-asserting `measured_mbuc == (PA + 3·2^w)·n_add − 6·n_add` on the artifact's
+  own static op-stream PA basis (kept explicitly distinct from the estimate's
+  executed avg-per-shot headline basis, so the two are not conflated). This closes
+  #27's optional deliverable 3 and softens `ecdlp_estimate.py`'s "numbers are
+  derived, not measured" caveat to "the headline is derived; the full ladder is also
+  emitted+measured end-to-end."
 - Consistent with [ADR 0001](0001-analysis-layer-isolated-from-score.md): the
   harness is `#[cfg(test)]`, never compiled into `build_circuit`; the scored circuit
   is byte-identical (`ops.bin` SHA unchanged).
