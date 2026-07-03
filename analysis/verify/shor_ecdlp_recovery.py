@@ -138,6 +138,8 @@ def _digits(scalar, w, t):
 
 
 def window_count(n, w):
+    if w <= 0:
+        raise ValueError(f"window width w must be positive, got {w}")
     t = 0
     while (1 << (w * t)) < n:
         t += 1
@@ -145,11 +147,20 @@ def window_count(n, w):
 
 
 def build_oracle(curve, gen, n, w, d, encoding, adder):
-    """Return R_key[a][b] for every (a, b) in Z_n x Z_n, where R(a,b)=[a]P+[b]Q is
-    computed by the windowed affine ladder.
+    """Return R_key[a][b] for every (a, b) in Z_n x Z_n, the point register value of
+    the windowed affine ladder oracle.
 
-      encoding: "standard" (digit g) or "offset" (digit g+1, ADR 0015 — addend
-                never the inf sentinel, acc never starts inf);
+      encoding: "standard" (digit g) computes R = [a]P + [b]Q;
+                "offset"   (digit g+1, ADR 0015 — addend never the inf sentinel, acc
+                never starts inf) computes the CONSTANT-TRANSLATED oracle
+                R = [a]P + [b]Q + [K]P with K = (1+d)*S, S = Σ_i 2^{w i} (mod n).
+                We deliberately do NOT apply offset_window_encoding.py's compile-time
+                correction point [K]P: the translation R -> R + [K]P is a bijection on
+                the point set, so it permutes the R-buckets without changing their
+                sizes, and the Shor measurement distribution — hence the recovered m —
+                is invariant under it (only a phase w^{cK} is introduced, |.|^2 = 1).
+                Recovery therefore needs no correction; the offset only moves WHERE the
+                dx=0 misfires land, which is exactly what this demonstration isolates.
       adder:    "complete" (reference group law) or "incomplete" (chord-only,
                 inv(0):=0 misfire — exactly the circuit's exceptional behaviour).
 
@@ -164,6 +175,11 @@ def build_oracle(curve, gen, n, w, d, encoding, adder):
     t = window_count(n, w)
     p = curve.p
     off = 1 if encoding == "offset" else 0
+    if encoding == "offset" and (1 << w) >= n:
+        # offset is inf-free only when the shifted index g+1 in [1, 2^w] never hits
+        # 0 mod n, i.e. 2^w < n (matches offset_window_encoding.validate_offset).
+        raise ValueError(f"offset encoding needs 2^w < n for an inf-free ladder, "
+                         f"got w={w}, n={n}")
 
     # dlog tables over the REAL curve.  mult[s] = [s]P; sentinel form maps INF->(0,0).
     mult = [curve.mul(s, gen) for s in range(n)]
