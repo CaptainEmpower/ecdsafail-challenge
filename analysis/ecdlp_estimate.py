@@ -87,8 +87,11 @@ PA_TOF = score["metrics"]["toffoli"]         # Toffoli per point addition (measu
 PA_QUBITS = score["metrics"]["qubits"]       # total qubits per point addition (measured)
 PA_TOF_DEPTH = depth["toffoli_depth"]        # non-Clifford critical path (measured)
 
-# ----------------------- PAPER'S PUBLISHED ZK BOUNDS -----------------------
-# (arXiv:2603.28846v2, Appendix A, ZK Proof Statements 1 & 2)
+# ------------------- BABBUSH PA OPERATING POINTS (baseline) ----------------
+# Challenge reference numbers for the Babbush et al. 2026 line of work
+# (arXiv:2603.28846v2). The paper's PUBLIC headline is the full-ECDLP totals;
+# these per-PA Pareto points' exact source (paper table vs organizer-supplied)
+# is to be pinned before submission — see the NOTE in the module docstring (F7).
 PAPER = {
     "low-qubit": {"pa_tof": 2_700_000, "pa_qubits": 1_175, "pa_ops": 17_000_000,
                   "ecdlp_tof": 90_000_000, "ecdlp_qubits": 1_200},
@@ -157,12 +160,12 @@ print(f"  PA Toffoli        : {PA_TOF:,}")
 print(f"  PA qubits (total) : {PA_QUBITS:,}")
 print(f"  PA Toffoli-depth  : {PA_TOF_DEPTH:,}")
 
-section("vs PAPER'S ZK-PROVEN POINT-ADDITION BOUNDS (Appendix A, Statements 1 & 2)")
+section("vs BABBUSH PA OPERATING POINTS (challenge reference numbers; source TBD, F7)")
 print(f"  {'variant':>10} | {'PA Toffoli':>12} | {'PA qubits':>9} | this repo beats?")
 for name, p in PAPER.items():
     beats = "YES (all axes)" if (PA_TOF <= p["pa_tof"] and PA_QUBITS <= p["pa_qubits"]) else "no"
     print(f"  {name:>10} | {p['pa_tof']:>12,} | {p['pa_qubits']:>9,} | {beats}")
-print(f"  -> measured PA {PA_TOF:,} Tof / {PA_QUBITS:,} q is under BOTH published bounds.")
+print(f"  -> measured PA {PA_TOF:,} Tof / {PA_QUBITS:,} q is under BOTH operating points.")
 
 section("FULL ECDLP via the paper's closed form  ECDLP=(PA+3*2^w)(2n/w-4)")
 co = A["completeness_overhead"]

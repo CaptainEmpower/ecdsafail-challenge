@@ -23,7 +23,7 @@ loop of Shor's algorithm applied to the elliptic-curve discrete-log problem
 (ECDLP), i.e. the computation that breaks ECDSA (Bitcoin/Ethereum keys). It is
 scored by `round(avg_toffoli_per_shot) × qubits` (`src/bin/eval_circuit.rs:434`),
 where "Toffoli" counts CCX+CCZ executions (`src/sim.rs:86`) and "qubits" is the
-maximum allocated qubit id + 1 (`src/circuit.rs:356`). Current metrics
+maximum allocated qubit id + 1 (`analyze_ops` in `src/circuit.rs`). Current metrics
 (`score.json`): **1,364,230 Toffoli × 1,152 qubits = 1,571,592,960**.
 
 This places the work in **quantum resource estimation**, a legitimate and
@@ -356,7 +356,8 @@ circuit (one point addition):
   end-to-end.
 
 **Key limitations this surfaces** (all real, all worth fixing):
-- The scored "qubits" is `max_id + 1` (highest allocated id + 1, `circuit.rs:356`).
+- The scored "qubits" is `max_id + 1` (highest allocated id + 1, computed by
+  `analyze_ops` in `src/circuit.rs`).
   This *equals* peak simultaneous width **because the builder reuses freed qubit
   ids** — the `ladder_composition` test measures peak flat at 1152 (Δ=0) across
   chained additions, i.e. ancilla ids are recycled, so `max_id+1` tracks the true

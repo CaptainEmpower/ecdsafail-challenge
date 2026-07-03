@@ -74,8 +74,9 @@ area with multiple 2026 results:
 - **Not the qubit-count frontier.** The A2 bound (1168) is a *paper* bound, not an
   independently-achieved qubit count for this repo's circuit; the honest,
   independently-measured number is the resident-quantum-addend port at **1424–1680**,
-  which is above Chevignard's P-256 frontier (1193), Han Luo's 1333, and Babbush's
-  `<1200`/`<1450`. (Note the A2 *bound* 1168 is actually just below the 1193 P-256
+  which is above Chevignard's P-256 frontier (1193), above Han Luo's 1333, above
+  Babbush's `<1200`, and straddles the `<1450` low-gate figure (its 1424 low end is
+  just under 1450). (Note the A2 *bound* 1168 is itself below the 1193 P-256
   frontier, but resting the "not smallest" claim on a bound this repo does not
   itself realize would be misleading — the port is the faithful figure.) The honest
   headline is *Toffoli-competitive with a much stronger correctness/completeness

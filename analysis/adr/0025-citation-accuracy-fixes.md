@@ -30,11 +30,12 @@ repo's own metric are described.
 
 - **F6:** state "1193 q for P-256 (1098 is P-224)" in `novelty-assessment.md`
   (table + "Not the qubit-count frontier"), `scientific-value.md`,
-  `technical-report.md` (§5 + §6), and `outline.md`. Because the corrected P-256
-  frontier (1193) is *below* the A2 bound this repo cites (1168), the "not the
-  frontier" claim is re-anchored on the repo's own faithful quantum-addend port
-  (1424–1680), which is genuinely above the frontier — not on a bound the circuit
-  does not itself realize.
+  `technical-report.md` (§5 + §6), and `outline.md`. The corrected P-256
+  frontier (1193) sits *above* the A2 bound this repo cites (1168) — i.e. the A2
+  bound is below the frontier — so resting "not the frontier" on the A2 bound
+  would be misleading (the circuit does not independently realize 1168). The claim
+  is instead re-anchored on the repo's own faithful quantum-addend port
+  (1424–1680), which is above the 1193 frontier.
 - **F7:** describe the PA Pareto points as "Babbush et al. 2026 point-addition
   operating points (the challenge's reference numbers)", state that the public
   headline is the full-ECDLP totals, and add a pre-submission action to pin the
