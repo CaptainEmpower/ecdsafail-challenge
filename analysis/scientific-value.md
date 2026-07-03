@@ -370,6 +370,22 @@ circuit (one point addition):
   parameters an exact convolution is infeasible, so the rigorous end-to-end bound is
   the union upper bound (`≈2⁻²⁵⁰` offset / `≈2⁻¹¹` standard, both `≪` Shor's `~1%`) —
   which the toy `exact ≤ union` results certify is tight, not loose.
+- **That scalar/dlog bound is now confirmed at the CIRCUIT level over real
+  coordinate arithmetic (issue #28, ADR 0018).** The whole bound (ADR 0016) and the
+  offset pin (ADR 0015) compute in the dlog model, whose one curve assumption is
+  `dx=0 ⇔ acc ≡ ±addend (mod n)`. `src/point_add/ec_exceptional.rs` builds a
+  **reversible** exceptional detector — `dx0 = (x1==x2)`, `acc=∞`/`addend=∞` as
+  `∞`-sentinel zero-tests, on real `(x,y)` coordinate qubits, **no modular inverse** —
+  and simulation-measures it over **every** `(acc, addend)` pair of a real
+  prime-order toy curve (`y²=x³+2x+2 / F₁₇`, `n=19`): the real-coordinate verdict
+  equals the scalar predicate `(m==0) ∨ (y==0) ∨ (y≡±m)` on all `19²` pairs (0
+  mismatches). Driving the ADR 0016 survival recursion with the *circuit-measured*
+  predicate reproduces the scalar-model residual (`exact ≤ union`), and the offset
+  encoding emits `addend=∞` **never** on real coordinates — the zero-window pin,
+  circuit-confirmed. So the equivalence the completeness bound rests on is no longer
+  only a dlog assumption; it holds by a reversible circuit over real coordinates,
+  exhaustively over the group. (Detects — does not yet *handle* via complete formulas;
+  the reversible λ-division point-add is a separate increment.)
 - **The amplitude-1 ∞ start is now circuit-demonstrated as removed (issue #5
   part (a), ADR 0009).** The one exceptional case that negligibility *cannot*
   cover — the accumulator starting at ∞ with amplitude 1 — is handled structurally

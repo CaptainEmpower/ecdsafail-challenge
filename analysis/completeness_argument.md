@@ -131,6 +131,26 @@ literature. This is what justifies `completeness_overhead = 1.0` in
   (or invoke a specific ladder ordering that provably avoids `{M,−M}`), as
   Roetteler et al. discuss. The 240-bit margin is large enough that even a very
   non-uniform distribution stays negligible, but this is not machine-checked.
+
+  > **The scalar/dlog model behind this bound is now confirmed at the circuit level
+  > over real coordinate arithmetic** (issue #28, [ADR 0018](adr/0018-circuit-level-exceptional-detection.md)).
+  > The exact end-to-end bound ([ADR 0016](adr/0016-exact-mid-ladder-bound.md)) and
+  > the offset-encoding pin (ADR 0015) both compute in the dlog model, whose one
+  > *curve* assumption is `dx=0 ⇔ acc ≡ ±addend (mod n)`.
+  > `src/point_add/ec_exceptional.rs` builds a **reversible** exceptional detector —
+  > `dx0 = (x1==x2)`, with `acc=∞` / `addend=∞` as `∞`-sentinel zero-tests, on real
+  > `(x,y)` coordinate qubits (no modular inverse) — and simulation-measures it over
+  > **every** `(accumulator, addend)` pair of a real prime-order toy curve
+  > (`y²=x³+2x+2 / F₁₇`, `n=19`). The measured real-coordinate verdict equals the
+  > scalar predicate `(m==0) ∨ (y==0) ∨ (y≡±m)` on all `19²` pairs (0 mismatches),
+  > driving the ADR 0016 survival recursion with the *circuit-measured* predicate
+  > reproduces the scalar-model end-to-end residual (`exact ≤ union`), and the offset
+  > encoding emits `addend=∞` **never** on real coordinates. So the equivalence this
+  > bound rests on is no longer only a dlog assumption (nor only a Python
+  > cross-check): it is confirmed by a reversible circuit over real coordinate
+  > arithmetic, exhaustively over the group. This does not remove the
+  > equidistribution heuristic (the *rate* still assumes near-uniformity), but it
+  > removes any doubt that `dx=0` on real coordinates is exactly the `{M,−M}` set.
 - **The ∞-removal depends on the ladder using direct-lookup initialisation.**
   This repo builds one addition, not the ladder; §3 relies on the paper's
   structure. Confirming it requires the Tier B ladder build ([issue #4](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/4)),

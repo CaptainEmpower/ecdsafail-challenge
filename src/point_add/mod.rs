@@ -71,6 +71,8 @@ mod completeness_probe;
 #[cfg(test)]
 mod constprop_gap;
 #[cfg(test)]
+mod ec_exceptional;
+#[cfg(test)]
 mod ladder_composition;
 #[cfg(test)]
 mod ladder_full;
