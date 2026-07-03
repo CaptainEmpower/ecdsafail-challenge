@@ -1,9 +1,7 @@
 # ADR 0020 — Reversible toy-width modular inverse (Path B prerequisite, issue #48)
 
-**Status:** Proposed — *scoping only, not yet implemented.* Records the design and
-rationale for the reversible modular inverse that Path B (ADR 0021) depends on, so
-the increment is captured without committing to the build. Promote to **Accepted**
-when implemented.
+**Status:** Accepted — implemented in `src/point_add/toy_field.rs` (`#[cfg(test)]`).
+Verified exhaustively over `F_p` for `p ∈ {5,7,11,13,17,19,23}`.
 **Date:** 2026-07-03
 
 ## Context
@@ -32,24 +30,39 @@ Build a **reversible toy-width modular inverse** as a `#[cfg(test)]` harness in 
 1. **Small prime field `F_p`** (the ADR 0018/0019 toy curves' base field, `p ~ 17–43`),
    registers a handful of bits wide, so verification is **exhaustive** over the whole
    field — the same reduced-width justification as ADR 0014/0016/0018.
-2. **Kaliski / EEA-style inverse** `inv(a) = a^{-1} mod p` for `a ≠ 0`, built from the
-   repo's existing reversible primitives (Cuccaro add/sub, comparator, controlled swap)
-   plus a bounded almost-inverse loop with a fixed toy iteration count (the width is
-   tiny, so the loop bound is a small constant — exactly why toy width is BMC/exhaustive
-   -tractable where 256-bit is not).
-3. **`inv(0)` well-defined** (the exceptional value): the circuit must produce a
-   deterministic, documented result for `a = 0` (the `inv(0):=0` convention ADR 0019
-   models classically, or an explicit flag), so the λ-division adder (ADR 0021) can
+2. **Reversible modular inverse** `inv(a) = a^{-1} mod p` for `a ≠ 0`, built entirely
+   from the repo's validated primitives, verified exhaustively.
+3. **`inv(0)` well-defined** (the exceptional value): the circuit produces `inv(0)=0`
+   (the convention ADR 0019 models classically), so the λ-division adder (ADR 0021) can
    branch on it to *handle* the `dx=0` exception rather than misfire.
 4. **Verification.** Exhaustive simulation over all `a ∈ F_p`: `inv(a)·a ≡ 1 (mod p)`
-   for `a ≠ 0`; the defined `inv(0)` behaviour; all scratch/ancilla returned to `|0⟩`
-   (reversibility, `emit_inverse`-safe); global phase `+1`. Optionally an SMT/z3 lemma
-   on the toy-width relation to mirror the arithmetic-proof layer.
+   for `a ≠ 0`; `inv(0)=0`; all scratch/ancilla returned to `|0⟩` (reversibility);
+   global phase `+1`.
 
-**Why a separate ADR/artifact from the point-add.** The inverse is the crux and the
-single largest sub-circuit; isolating it lets it be verified exhaustively on its own
-before the λ-division adder composes it. It is also independently useful (any modular
-division at toy width).
+## As built (implementation reality)
+
+**Fermat, not Kaliski.** The inverse is realized as `a^{p-2} mod p` by left-to-right
+square-and-multiply over the fixed classical exponent `p-2`, using a from-scratch
+reversible **modular multiply** (`mod_mul`, schoolbook double-and-add) built on the
+validated VBE modular adder (`qaddend_testbed::mod_add`, ADR 0014). Kaliski/EEA is the
+*space-optimal* choice for the real 256-bit inverse (Roetteler et al.), but at toy width
+Fermat-via-multiply is markedly simpler to build correctly and to verify exhaustively,
+and it is equally a **reversible-arithmetic** inversion (not a table) — the property this
+ADR is about. The space cost is irrelevant here (analysis-layer, toy width); if a future
+increment needs a width-faithful inverse it would swap in Kaliski behind the same
+interface.
+
+**Uncomputation by op-reversal.** Because the whole gadget is built from `X`/`CX`/`CCX`
+only (all involutions), a forward-only fragment is cleanly uncomputed by re-emitting its
+op list reversed. Every gadget is *compute → copy result into a clean `out` → reverse*,
+so `out ^= f(inputs)` with inputs preserved and all scratch returned to `|0⟩` — no
+hand-written inverse circuits. `mod_mul` / `mod_inv` are exposed as composable clean
+gadgets (`emit_mod_mul` / `emit_mod_inv`) for ADR 0021.
+
+**Why a separate ADR/artifact from the point-add.** The inverse (and the multiply it
+needs) is the crux; isolating it lets it be verified exhaustively on its own before the
+λ-division adder composes it. Both are independently useful (any modular division/multiply
+at toy width).
 
 ## Consequences (anticipated)
 
@@ -61,6 +74,7 @@ division at toy width).
   scored Solinas add over all inputs; this adds a *different* operation (inverse) at a
   *verifiable* width, not a re-proof of existing arithmetic.
 - **Isolation preserved** ([ADR 0001](0001-analysis-layer-isolated-from-score.md)):
-  `#[cfg(test)]`, `ops.bin` byte-identical.
-- **Effort/priority.** High-effort; scheduled after the paper writeup + uv migration.
-  Remains Proposed until built — a design record, not a commitment.
+  `#[cfg(test)]`, `ops.bin` byte-identical (SHA `f30d8365…` unchanged).
+- **Done.** `mod_mul` and `mod_inv` verified exhaustively over `F_p`
+  (`p ∈ {5,7,11,13,17,19,23}`): `out=(x·y) mod p` / `inv(a)=a^{p-2}`, inputs preserved,
+  all scratch `|0⟩`, phase `+1`. `emit_mod_mul` / `emit_mod_inv` are ready for ADR 0021.

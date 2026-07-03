@@ -80,6 +80,8 @@ mod ladder_full;
 mod ladder_stream;
 #[cfg(test)]
 mod qaddend_testbed;
+#[cfg(test)]
+mod toy_field;
 
 mod emit;
 pub(crate) use emit::*;
