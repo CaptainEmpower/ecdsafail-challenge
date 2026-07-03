@@ -36,8 +36,8 @@ test:
 
 # ── analysis: scientific-rigor suite (z3 proofs + cost model) ───────────────
 
-# Full 11-stage analysis suite (formal proofs + physical cost model).
-analysis: solinas peephole refadders controlled-lookup lookup-cost completeness direct-lookup offset mid-ladder cost-model ecdlp
+# Full 12-stage analysis suite (formal proofs + physical cost model).
+analysis: solinas peephole refadders controlled-lookup lookup-cost completeness direct-lookup offset mid-ladder recover cost-model ecdlp
 
 # Byte-compile all analysis python — catches version-incompatible syntax. To
 # reproduce CI's 3.11-floor guard exactly, pass a 3.11 interpreter:
@@ -84,6 +84,10 @@ offset:
 mid-ladder:
     @echo "### Exact end-to-end mid-ladder exceptional bound (issue #28) ###"
     cd analysis && {{PYTHON}} verify/mid_ladder_bound.py
+
+recover:
+    @echo "### End-to-end Shor-ECDLP discrete-log recovery on toy curves (issue #46) ###"
+    cd analysis && {{PYTHON}} verify/shor_ecdlp_recovery.py
 
 cost-model:
     @echo "### Physical fault-tolerant cost model ###"

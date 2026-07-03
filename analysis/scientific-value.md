@@ -488,6 +488,11 @@ is **anchored to a physical cost model** with explicit assumptions and now a
 **measured** toffoli-depth → runtime → spacetime volume (§2). The full ECDLP ladder
 is now stream-emitted and measured end-to-end (`ladder_full.rs` → `ladder_measured.json`,
 consumed by `ecdlp_estimate.py`), so the derived headline is corroborated by a
-measured count. A remaining stretch goal is symbolic
-execution of the emitted op-stream on computational-basis inputs to prove the
-*composed* point-add end-to-end.
+measured count. And the completeness argument no longer stops at a bound: the full
+two-register Shor-ECDLP, driven by the incomplete affine adder this circuit implements
+plus the offset/direct-lookup handling, **recovers the secret discrete log** on toy
+prime-order curves by exact statevector simulation (`verify/shor_ecdlp_recovery.py`,
+issue #46, ADR 0019) — an executable demonstrated attack at toy scale, with the
+`∞`-free encoding condition shown load-bearing for the recovery, not only the
+amplitude figure. A remaining stretch goal is symbolic execution of the emitted
+op-stream on computational-basis inputs to prove the *composed* point-add end-to-end.
