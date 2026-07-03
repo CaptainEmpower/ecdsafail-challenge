@@ -42,8 +42,8 @@ test:
 
 # ── analysis: scientific-rigor suite (z3 proofs + cost model) ───────────────
 
-# Full 13-stage analysis suite (formal proofs + physical cost model).
-analysis: solinas peephole refadders controlled-lookup lookup-cost completeness direct-lookup offset mid-ladder recover toyshor cost-model ecdlp
+# Full 14-stage analysis suite (formal proofs + physical cost model).
+analysis: solinas peephole mbuc refadders controlled-lookup lookup-cost completeness direct-lookup offset mid-ladder recover toyshor cost-model ecdlp
 
 # Byte-compile all analysis python — catches version-incompatible syntax. To
 # reproduce CI's 3.11-floor guard exactly, pass a 3.11 interpreter:
@@ -62,6 +62,10 @@ solinas:
 peephole:
     @echo "### Peephole / adder / comparator proofs (z3) ###"
     cd analysis && {{PYTHON}} verify/peephole_identities.py
+
+mbuc:
+    @echo "### Emitted _fast adder measurement-based uncompute: HMR+cz_if phase proof (z3, F1/F2) ###"
+    cd analysis && {{PYTHON}} verify/mbuc_phase_correction.py
 
 refadders:
     @echo "### Reference kickmix adder validation (source-paper artifacts) ###"
