@@ -181,3 +181,19 @@ literature. This is what justifies `completeness_overhead = 1.0` in
 - **Phase, not just value.** §2 shows exceptions also corrupt phase; the bound in
   §4 covers this because a mis-phased state at amplitude ε contributes ≤ ε to the
   failure probability, exactly as a wrong-value state does.
+- **The argument is now demonstrated by an actual recovery, not only bounded**
+  (issue #46, [ADR 0019](adr/0019-end-to-end-ecdlp-recovery.md)).
+  `verify/shor_ecdlp_recovery.py` runs the *full* two-register Shor-ECDLP on toy
+  prime-order curves by exact statevector simulation and **recovers the secret
+  discrete log `m`** while computing `[a]P+[b]Q` with the **incomplete affine adder
+  this circuit implements** (chord-only, `inv(0):=0` misfire) plus the completeness
+  handling above (direct-lookup init + offset encoding). The **complete** adder gives
+  `P_success = (n−1)/n` exactly (a harness check); the **offset + incomplete** adder
+  still recovers the true `m` as the maximum-likelihood dlog on curves of order
+  19/29/41, with `P_success` rising toward `(n−1)/n` as the exceptional rate thins
+  with `n` — the payload the bound was always for. Dropping the offset encoding
+  (standard windowing) feeds the zero-window `∞` sentinel to the chord formula and
+  collapses recovery, so §4's `∞`-free encoding condition is shown load-bearing for
+  the *attack*, not only for the amplitude figure. This is the executable end-to-end
+  complement to the exact bound (§4, ADR 0016) and the reversible detector (ADR 0018):
+  the completeness argument now ends in a recovered secret.
