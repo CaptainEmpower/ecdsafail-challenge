@@ -187,6 +187,40 @@ for name, p in PAPER.items():
     print(f"  vs paper {name:>9} published <= {p['ecdlp_tof']/1e6:.0f}M Tof / {p['ecdlp_qubits']:,} q"
           f"  ->  {ratio:.2f}x fewer Toffoli")
 
+ladder = load("analysis/ladder_measured.json")
+if ladder is not None:
+    section("MEASURED FULL-LADDER (streamed emission+count — ladder_full.rs, ADR 0011/0017)")
+    lw = ladder["w"]
+    ln = ladder["n_add"]
+    # The estimate's HEADLINE above uses the EXECUTED avg-per-shot PA (score.json);
+    # this artifact is the STATIC op-stream PA basis. They are two legitimate bases
+    # (a mis-conflation would be a bug), so we cross-check the stream against the
+    # closed form ON ITS OWN static basis — the same identity ladder_full asserts.
+    derived_static = (ladder["pa_toffoli"] + lookup_toffoli(lw)) * ln
+    mbuc_saving = 6 * ln                       # reversible unload -> MBUC unload
+    assert ladder["ladder_toffoli_mbuc"] == derived_static - mbuc_saving, (
+        "measured MBUC stream inconsistent with the static-basis closed form"
+    )
+    assert ladder["read_selector_toffoli"] == (1 << (lw + 1)) - 4, (
+        "measured QROM read selector != 2^(w+1)-4"
+    )
+    print(f"  streamed {ln}-window w={lw} ladder, emitted+counted end-to-end (no materialization):")
+    print(f"    full-ECDLP Toffoli (reversible)  : {ladder['ladder_toffoli_reversible']:,}"
+          f"  (~{ladder['ladder_toffoli_reversible']/1e6:.1f}M)")
+    print(f"    full-ECDLP Toffoli (MBUC unload) : {ladder['ladder_toffoli_mbuc']:,}"
+          f"  (~{ladder['ladder_toffoli_mbuc']/1e6:.1f}M)")
+    print(f"    full-ECDLP toffoli-depth         : {ladder['ladder_toffoli_depth']:,}"
+          f"  (~{ladder['ladder_toffoli_depth']/1e6:.1f}M; {ladder['ladder_toffoli_depth_basis']})")
+    print(f"    peak qubits (paper A2)           : {ladder['peak_qubits_a2']:,}"
+          f"   [this PA's quantum-addend port {ladder['qaddend_port_peak_lo']:,}.."
+          f"{ladder['qaddend_port_peak_hi']:,}, ADR 0013]")
+    print(f"    PA basis (static op-stream)      : {ladder['pa_toffoli']:,} Toffoli /"
+          f" {ladder['pa_qubits']:,} q / depth {ladder['pa_toffoli_depth']:,}")
+    print(f"  cross-check: measured MBUC {ladder['ladder_toffoli_mbuc']:,} =="
+          f" (PA+3·2^{lw})·{ln} − 6·{ln} = {derived_static - mbuc_saving:,}  [consistent]")
+    print("  NB: this is the STATIC op-stream basis; the w=16 HEADLINE above is the")
+    print("  EXECUTED avg-per-shot basis (score.json) — two valid PA measures, not a gap.")
+
 section("PHYSICAL FAULT-TOLERANT COST  (w=16 headline)")
 d = A["distance"]
 phys = int(q_full * A["phys_per_patch"](d) * A["factory_routing_overhead"])
@@ -219,6 +253,12 @@ print("    THIS PA holds it resident across the peak: +256..512 qubits (MEASURED
 print("    issue #27, ADR 0013: port peak 1408..1664 vs PA 1152). Toffoli unaffected.")
 print("  - COMPLETENESS (P==Q, P==-Q, infinity) assumed negligible, as in the paper.")
 print("    This is a COST estimate, not a verified attack.")
-print("  - Numbers are DERIVED (measured PA x paper's closed form), not emitted+")
-print("    measured over the full ladder (that is Tier B; see scientific-value.md).")
+print("  - The HEADLINE is DERIVED (measured PA x paper's closed form). The full")
+if ladder is not None:
+    print("    ladder is ALSO emitted+measured end-to-end (streamed, no materialization)")
+    print("    — see the MEASURED FULL-LADDER section / ladder_measured.json (issue #27")
+    print("    item 3, ADR 0011/0017); the two agree on the static basis to 6·n_add.")
+else:
+    print("    ladder Tier-B stream lands in ladder_full.rs; generate its measured")
+    print("    artifact (ladder_measured.json) to have it accompany this headline.")
 print("=" * 78)

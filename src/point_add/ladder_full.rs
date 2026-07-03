@@ -47,14 +47,16 @@
 //! then unread, is simulation-verified to compute `acc + P[k]` with all ancilla
 //! clean. So the quantum-addend point-add is no longer hypothetical.
 //!
-//! **Still not measured here** (the remaining Tier B build): the **exact depth** of
-//! a *functionally composed full-width* ladder — this repo's scored PA folds a
-//! *classical* compile-time addend, whereas the ladder loads `P[k]` from a *quantum*
-//! table that the addition then consumes (the read→add data dependency, exhibited
-//! at small width in the testbed). Emitting the lookup on *disjoint* ids (as here)
-//! UNDER-counts the serial depth, so depth is reported as the measured add-dominated
-//! critical path, flagged. Issue #5's mid-ladder ∞/`dx=0` residual lands in that
-//! same quantum-addend testbed and is out of scope for this cost harness.
+//! **The read→add serialization depth is now measured** (`ladder_stream.rs`, ADR
+//! 0017): emitting the lookup on *disjoint* ids (as here) UNDER-counts the serial
+//! depth, so depth is reported below as the add-dominated critical path, flagged.
+//! `ladder_stream.rs` closes that gap — it streams the *true* quantum-addend
+//! read→add→unread (the QROM writing the addend the adder consumes) over the real
+//! 28-window count with the workspace reused across windows, and measures the true
+//! serialized toffoli-depth against exactly this disjoint model; the delta is the
+//! per-window QROM serialization depth this harness omits. Issue #5's mid-ladder
+//! ∞/`dx=0` residual lands in that same quantum-addend testbed and is out of scope
+//! for this cost harness.
 //!
 //! `#[cfg(test)]` only; never compiled into the scored circuit.
 
@@ -239,6 +241,41 @@ fn full_ladder_streamed_toffoli_qubits_depth() {
     eprintln!(
         "  vs derived (PA+3·2^w)·n_add = {derived_tof}  (Δ = {delta} = 6·n_add, MBUC saving)"
     );
+
+    // Item 3 (issue #27, ADR 0017): emit the streamed measured totals to a JSON
+    // artifact that `analysis/ecdlp_estimate.py` consumes alongside its closed-form
+    // headline — so the full-ladder resources are a MEASURED output, not only
+    // derived. Env-gated so the default run never writes into the tree; the
+    // committed `analysis/ladder_measured.json` is regenerated with:
+    //   LADDER_MEASURED_JSON=analysis/ladder_measured.json \
+    //     cargo test --release --lib full_ladder_streamed_toffoli_qubits_depth -- --ignored
+    // Every field below is a value MEASURED on the streamed op count above, on the
+    // static op-stream PA basis (pa_toffoli); the estimate keeps this distinct from
+    // its executed avg-per-shot headline.
+    if let Ok(path) = std::env::var("LADDER_MEASURED_JSON") {
+        let port_lo = pa_qubits + 256 + w;
+        let port_hi = pa_qubits + 512 + w;
+        let json = format!(
+            "{{\n  \"_provenance\": \"MEASURED by src/point_add/ladder_full.rs \
+             (full_ladder_streamed_toffoli_qubits_depth), streamed emission+count of the \
+             {n_add}-window w={w} ECDLP ladder; static op-stream PA basis. Regenerate with \
+             LADDER_MEASURED_JSON=analysis/ladder_measured.json cargo test --release --lib \
+             full_ladder_streamed_toffoli_qubits_depth -- --ignored\",\n  \
+             \"w\": {w},\n  \"n_add\": {n_add},\n  \"pa_toffoli\": {pa_tof},\n  \
+             \"pa_qubits\": {pa_qubits},\n  \"pa_toffoli_depth\": {pa_tdepth},\n  \
+             \"read_selector_toffoli\": {qrom_read_tof},\n  \
+             \"ladder_toffoli_reversible\": {ladder_tof_rev},\n  \
+             \"ladder_toffoli_mbuc\": {total_tof_mbuc},\n  \
+             \"ladder_toffoli_depth\": {ladder_tdepth},\n  \
+             \"ladder_toffoli_depth_basis\": \"add-dominated (QROM emitted on disjoint ids; \
+             the read->add serialization is measured separately in ladder_stream.rs, ADR 0017)\",\n  \
+             \"peak_qubits_a2\": {total_qubits_a2},\n  \
+             \"qaddend_port_peak_lo\": {port_lo},\n  \
+             \"qaddend_port_peak_hi\": {port_hi}\n}}\n"
+        );
+        std::fs::write(&path, json).expect("write LADDER_MEASURED_JSON artifact");
+        eprintln!("  wrote measured full-ladder JSON -> {path}");
+    }
 
     // Underflow-safe cross-checks: measured MBUC total is at/under the derived
     // headline, off only by the MBUC lookup saving.

@@ -1,0 +1,16 @@
+{
+  "_provenance": "MEASURED by src/point_add/ladder_full.rs (full_ladder_streamed_toffoli_qubits_depth), streamed emission+count of the 28-window w=16 ECDLP ladder; static op-stream PA basis. Regenerate with LADDER_MEASURED_JSON=analysis/ladder_measured.json cargo test --release --lib full_ladder_streamed_toffoli_qubits_depth -- --ignored",
+  "w": 16,
+  "n_add": 28,
+  "pa_toffoli": 1446685,
+  "pa_qubits": 1152,
+  "pa_toffoli_depth": 1077263,
+  "read_selector_toffoli": 131068,
+  "ladder_toffoli_reversible": 47846988,
+  "ladder_toffoli_mbuc": 46012036,
+  "ladder_toffoli_depth": 30163364,
+  "ladder_toffoli_depth_basis": "add-dominated (QROM emitted on disjoint ids; the read->add serialization is measured separately in ladder_stream.rs, ADR 0017)",
+  "peak_qubits_a2": 1168,
+  "qaddend_port_peak_lo": 1424,
+  "qaddend_port_peak_hi": 1680
+}

@@ -286,9 +286,37 @@ circuit (one point addition):
   register all clean/preserved (read selector Toffoli `= 2^(w+1)−4`, tying back to
   ADR 0010). This closes the "does the composition even work" question ADR 0011
   deferred and gives the register-overlap picture an executable form (addend +
-  spine ride on top of the adder — the small-scale ADR 0013). Still open on this
-  testbed: the field-modular reduction tail, and #28's EC exceptional cases
-  (`P==Q`, `dx=0`, ∞) which need the group law on top.
+  spine ride on top of the adder — the small-scale ADR 0013). The **field-modular
+  reduction tail** is delivered too (`qrom_fed_quantum_addend_modular_add`,
+  `acc := (acc + P[k]) mod p` via a Vedral–Barenco–Ekert modular adder, ancilla-clean
+  by simulation). Still open on this testbed: #28's EC exceptional cases (`P==Q`,
+  `dx=0`, ∞), which need the group law on top.
+- **The true quantum-addend ladder is now multi-window and its read→add
+  serialization depth is measured (issue #27 item 2, ADR 0017).**
+  `src/point_add/ladder_stream.rs` composes ADR 0014's verified `read→add→unread`
+  over `m` windows. Its **functional** test simulation-verifies the *accumulator
+  threading across windows* — `acc == (y + Σ_j T_j[k_j]) mod p` on one shared
+  workspace, all ancilla clean — the multi-window step the single-add testbed did
+  not exercise. Its **measurement** test streams the workspace ids reused across the
+  real `n_add = 28` windows (no materialization) and measures the *true* serialized
+  `read→add→unread` toffoli-depth (the QROM writes the addend the adder consumes, a
+  real RAW hazard) against the **disjoint** model `ladder_full.rs` uses (QROM ∥ add):
+  at `(n,w)=(32,6)` the overlap per-window depth `558` exceeds the add-only `320` by
+  `238` — the per-window QROM serialization depth `ladder_full.rs` omits — and the
+  disjoint peak is `+n` wider (ADR 0011's flagged over-count, executable). So the
+  "measured, not assumed" read→add depth #27 asks for is delivered at representative
+  width, with a closed-form scale to `w=16`; the materialized 256-bit run (~290 GB)
+  stays out of scope per #27.
+- **The full-ladder resources are now a measured output in the estimate (issue #27
+  item 3, ADR 0017).** `ladder_full.rs` emits its streamed w=16 totals to
+  `analysis/ladder_measured.json` (Toffoli `47.8M` reversible / `46.0M` MBUC,
+  toffoli-depth `30.16M`, peak `1168`), and `analysis/ecdlp_estimate.py` **consumes**
+  it — printing a dedicated *measured* full-ladder section alongside its derived
+  headline and cross-asserting `measured_mbuc == (PA+3·2^w)·n_add − 6·n_add` on the
+  artifact's static op-stream PA basis (kept distinct from the executed avg-per-shot
+  headline). So the estimate's old "numbers are derived, not emitted+measured" caveat
+  is retired: the headline is derived, and the full ladder is *also* emitted+measured
+  end-to-end.
 
 **Key limitations this surfaces** (all real, all worth fixing):
 - The scored "qubits" is `max_id + 1` (total allocated ids), **not peak

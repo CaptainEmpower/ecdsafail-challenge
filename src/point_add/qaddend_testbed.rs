@@ -117,7 +117,7 @@ fn sub_np1(circ: &mut B, addend: &[QubitId], acc: &[QubitId], hi: QubitId, carry
 /// (mod-2^n) testbed. The `hi`/`flag`/`carry` single ancilla and the n-bit `preg`
 /// all return to |0>.
 #[allow(clippy::too_many_arguments)]
-fn mod_add(
+pub(super) fn mod_add(
     circ: &mut B,
     addend: &[QubitId],
     acc: &[QubitId],
@@ -196,7 +196,13 @@ fn and_into(circ: &mut B, ctrl: Option<QubitId>, addr_bit: QubitId, anc: QubitId
 /// into `addend`. Self-inverse on `addend` (applying it twice clears the addend),
 /// and self-uncomputing on `anc`.
 #[allow(clippy::too_many_arguments)]
-fn qrom_read(circ: &mut B, win: &[QubitId], anc: &[QubitId], addend: &[QubitId], table: &[u64]) {
+pub(super) fn qrom_read(
+    circ: &mut B,
+    win: &[QubitId],
+    anc: &[QubitId],
+    addend: &[QubitId],
+    table: &[u64],
+) {
     fn rec(
         circ: &mut B,
         level: usize,
