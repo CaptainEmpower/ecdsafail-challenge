@@ -31,6 +31,35 @@ cryptographically policy-relevant research area. The improvement is real *if*
 (a) the circuit is provably correct, and (b) the score maps to a physical cost.
 Sections 1–2 supply exactly those two missing pieces.
 
+### Value to cryptanalysis (honest scope)
+
+Two senses of "cryptanalysis" pull apart here, and the honest answer differs:
+
+- **Cryptanalysis as *breaking* — no contribution.** There is no new attack, no
+  reduced qubit/gate frontier (the primitive is `1152` q; the frontier is
+  Chevignard's `1098` and dropping), and no structural weakness exposed in
+  secp256k1. The hardness of the ECDLP is untouched; ECDSA is exactly as safe as
+  before.
+- **Cryptanalysis as *resource estimation / threat assessment* — a narrow but real
+  contribution, to its *epistemics*.** Quantum resource estimation feeds
+  PQC-migration timelines and harvest-now-decrypt-later risk models. The flagship
+  2026 estimates establish correctness by sampling/fuzz (Babbush: ≥99% Fiat–Shamir
+  fuzz, a ZK proof *of resource costs* — not all-inputs correctness) or leave it to
+  analysis (Han Luo, Chevignard), and all three treat the incomplete affine adder's
+  exceptional cases by negligibility-by-citation (a full-text pass found zero
+  occurrences of SMT/z3/model-checking or an explicit point-at-infinity treatment in
+  any of them). This repo instead **machine-checks** the load-bearing arithmetic over
+  all inputs (z3 + Kani on the real `alloy` U256 type, §1) and turns completeness from
+  a cited argument into a **computed + circuit-verified** result (`≈2⁻²⁵⁰` exact bound,
+  reversible real-coordinate detector — see `completeness_argument.md`,
+  `ec_exceptional.rs`).
+
+So the deliverable is not a break but a **standard of evidence**: a template showing
+that "X qubits, Y Toffoli" estimates *can* be machine-checked and
+completeness-verified without giving up competitiveness. That is a reproducibility /
+trust contribution to the sub-discipline — real, but narrow, and deliberately framed
+that way rather than as a frontier claim.
+
 ---
 
 ## 1. Formal correctness (was: empirical only)

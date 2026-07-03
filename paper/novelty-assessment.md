@@ -75,6 +75,24 @@ area with multiple 2026 results:
 - **No demonstrated end-to-end attack** — a verified primitive + derived/measured
   ladder + a completeness argument, not a run.
 
+## Does this add value to cryptanalysis?
+
+Separate the two senses of the word — the honest answer differs:
+
+- **As *breaking* — no.** No new attack, no reduced qubit/gate frontier, no
+  structural weakness in secp256k1. The ECDLP's hardness is untouched.
+- **As *resource estimation / threat assessment* — yes, narrowly, to its
+  *epistemics*.** The value is not a smaller number but a **more trustworthy** one:
+  machine-checked all-inputs arithmetic (z3+Kani) where the frontier estimates use
+  fuzz/analysis, and a computed + circuit-verified completeness treatment where they
+  cite negligibility. The message a resource-estimation cryptanalyst takes away is
+  *"these estimates can and should be machine-checked and completeness-verified —
+  here is a template, and proof it costs nothing in competitiveness to do so."*
+
+That is a reproducibility / standard-of-evidence contribution to the sub-discipline,
+which is exactly why the framing below leads with rigor rather than "beats the
+frontier."
+
 ## Recommendation
 
 Publish, if at all, as a **methods / verified-artifact** contribution:
