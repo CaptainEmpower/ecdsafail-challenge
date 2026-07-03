@@ -80,7 +80,8 @@ area with multiple 2026 results:
 - **No demonstrated end-to-end attack *at scale*.** The full Shor-ECDLP pipeline
   *is* now demonstrated to **recover the discrete log** — but at **toy scale** (exact
   statevector simulation on prime-order curves of order 19/29/41, using the incomplete
-  affine adder + offset/direct-lookup handling; `shor_ecdlp_recovery.py`, ADR 0019).
+  affine adder + offset/direct-lookup handling; `analysis/verify/shor_ecdlp_recovery.py`,
+  run via `just recover`; ADR 0019).
   The 256-bit attack remains a *derived/measured cost estimate*, not a run — the toy
   demonstration + closed-form scale-up of the exceptional rate is the honest bridge,
   not an executed 256-bit break.
