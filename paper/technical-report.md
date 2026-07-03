@@ -97,8 +97,8 @@ SHA-256); all reported numbers follow deterministically.
 
 - The full-ECDLP figure is **derived/composed** (measured point-add × the source
   paper's windowed-ladder structure), not an independent end-to-end circuit or a new
-  algorithm; it does not compete with space-optimized algorithmic results
-  (Chevignard et al. 2026, ~1098–1333 qubits).
+  algorithm; it does not compete with the space-optimized algorithmic results
+  (Chevignard et al. 2026, 1098 qubits; Han Luo et al. 2026, 1333 qubits).
 - `1168` qubits (paper bound A2) is not the qubit frontier; a faithful
   resident-quantum-addend port is measured wider (1424–1680). The honest headline is
   *Toffoli-competitive with a stronger correctness/completeness guarantee*.
@@ -111,11 +111,13 @@ SHA-256); all reported numbers follow deterministically.
 ## 6. Related work
 
 Roetteler et al. 2017 (ePrint 2017/598); Babbush et al. 2026 (arXiv:2603.28846,
-Google Quantum AI — ZK-validated estimates, Fiat–Shamir fuzz correctness);
-Chevignard–Fouque–Schrottenloher, EUROCRYPT 2026 (arXiv:2604.02311, space-optimized
-EEA inversion). This work is orthogonal: it adds machine-checked correctness,
-computed/verified completeness, and full reproducibility to an aggressively
-optimized primitive.
+Google Quantum AI — zero-knowledge proof *of resource costs*, ≥99% Fiat–Shamir fuzz
+correctness, no explicit completeness treatment); Han Luo et al. 2026
+(arXiv:2604.02311, Tsinghua/Peking — space-optimized Proos–Zalka EEA inversion, 1333
+qubits); Chevignard–Fouque–Schrottenloher, EUROCRYPT 2026 (ePrint 2026/280 —
+space-optimized inversion, 1098 qubits, the current qubit frontier). This work is
+orthogonal: it adds machine-checked correctness, computed/verified completeness, and
+full reproducibility to an aggressively optimized primitive.
 
 ## How to cite
 
