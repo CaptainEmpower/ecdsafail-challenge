@@ -18,7 +18,7 @@ area with multiple 2026 results:
 | Roetteler et al. 2017 (ePrint 2017/598) | ~2330 qubits, ~1.3·10¹¹ Toffoli | negligibility argument for exceptions (the framework this repo uses) | no (analysis) |
 | Babbush et al. 2026 (arXiv:2603.28846, Google QAI) | `<1200 q / <90M Toffoli` or `<1450 q / <70M` | ~99% correctness via Fiat–Shamir **fuzz** (sampling, §5); the ZK proof is **"of Resource Costs" (App. A) — it validates the *cost bounds + honest fuzz execution*, not all-inputs circuit correctness**; full text has **no** "point at infinity" / "complete formula" (completeness absorbed by Shor's ~1%) | none (full text: `SMT/z3/model-check = 0`) |
 | Han Luo et al. 2026 (arXiv:2604.02311, Tsinghua/Peking) | **1333 q** (prime 256-bit); `5n+4⌊log₂n⌋+O(1)` q, `O(n³)` Toffoli via refined Proos–Zalka EEA register-sharing — a genuine *space* advance | analytic; no explicit exceptional-case treatment (full text: `fuzz = 0`) | none (theoretical) |
-| Chevignard–Fouque–Schrottenloher, EUROCRYPT 2026 (ePrint 2026/280) | **1098 q** (3.12n space) — the current qubit frontier | analytic | none (theoretical) |
+| Chevignard–Fouque–Schrottenloher, EUROCRYPT 2026 (ePrint 2026/280) | **1193 q for P-256** (256-bit); 1098 q is their **P-224** figure — the current qubit frontier | analytic | none (theoretical) |
 | **This repo** | PA `1.36M Toffoli × 1152 q`; derived+measured full-ECDLP `~46M Toffoli / 1168 q` | **exact** end-to-end mid-ladder bound + **circuit-level** real-coordinate exceptional detector + offset ∞-removal | **z3 + Kani**, bound to the real `alloy` U256 type |
 
 ## What is genuinely differentiating
@@ -63,16 +63,34 @@ area with multiple 2026 results:
    deterministic analysis suite, ADR trail. Reproducibility at this granularity is
    uncommon for resource-estimate papers.
 
+> **Scope discipline for items 1–2 (referee F1/F2/F4/F5, ADR 0026).** State these
+> precisely or they overclaim: (1) the machine-checked layer covers the **plain**
+> `mod_add_qq` **integer identity** (Kani proves a re-implementation, not the
+> emitter); the scored circuit's emitted `_fast` measurement-based adder is covered
+> by the 9024-shot sample, not the proofs. (2) The completeness bound is **exact at
+> toy scale** and an **analytic union bound (equidistribution)** at attack scale;
+> the demonstrated recovery runs a **model** adder in Python, not the scored
+> circuit (whose measured `dx=0` phase-garbage the model does not reproduce). The
+> defensible framing is "machine-checked integer core + simulation-backed
+> completeness argument, demonstrated at toy scale" — still a real delta vs.
+> fuzz-only/negligibility-by-citation, but narrower than the bare verbs imply.
+
 ## What is NOT a strong claim (be honest)
 
 - **Not a new algorithm.** The point-add uses known techniques (Cuccaro, Solinas,
   Gidney unary-iteration QROM, kickmix measurement-based uncompute) tuned hard. The
   full-ECDLP figure is **derived/composed** (measured PA × the paper's ladder),
   not an independent end-to-end circuit. It does not compete with the *algorithmic*
-  space results (Chevignard 1098 q; Han Luo 1333 q).
-- **Not the qubit-count frontier.** 1168 (A2) is above Chevignard's 1098 and Han
-  Luo's 1333, and above Babbush's `<1200` on the Low-Gate side; the
-  resident-quantum-addend port is measured wider still (1424–1680). The honest
+  space results (Chevignard 1193 q for P-256 — 1098 q is their P-224 figure;
+  Han Luo 1333 q).
+- **Not the qubit-count frontier.** The A2 bound (1168) is a *paper* bound, not an
+  independently-achieved qubit count for this repo's circuit; the honest,
+  independently-measured number is the resident-quantum-addend port at **1424–1680**,
+  which is above Chevignard's P-256 frontier (1193), above Han Luo's 1333, above
+  Babbush's `<1200`, and straddles the `<1450` low-gate figure (its 1424 low end is
+  just under 1450). (Note the A2 *bound* 1168 is itself below the 1193 P-256
+  frontier, but resting the "not smallest" claim on a bound this repo does not
+  itself realize would be misleading — the port is the faithful figure.) The honest
   headline is *Toffoli-competitive with a much stronger correctness/completeness
   guarantee*, not *smallest*.
 - **Toffoli×qubits is a competition metric**, not a physical cost; the defensible

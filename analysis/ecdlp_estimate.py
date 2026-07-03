@@ -22,10 +22,17 @@ register, and the accumulator/ancilla registers are reused across all additions
 where PA_Toff / PA_Qubits are the cost of ONE point-addition circuit. This repo
 IS an implementation of that point-addition primitive (a "kickmix" circuit using
 measurement-based uncomputation, Appendix A.4). We substitute this repo's
-MEASURED PA metrics into (A1)/(A2) and compare against the paper's published,
-zero-knowledge-proven resource bounds.
+MEASURED PA metrics into (A1)/(A2) and compare against the Babbush et al. 2026
+point-addition operating points (the challenge's reference numbers).
 
-The paper's ZK-proven point-addition (PA) bounds and resulting full ECDLP:
+NOTE (referee F7, issue #61): Babbush et al.'s PUBLIC headline is the full-ECDLP
+totals (<=90M Tof / <1200 q; <=70M / <1450 q). The per-point-addition Pareto
+points below are the challenge's reference numbers for the same line of work; the
+exact source (paper table vs. organizer-supplied) should be pinned before any
+submission. They are the comparison baseline here, not asserted as the paper's
+published PA bounds.
+
+The point-addition (PA) Pareto points and resulting full ECDLP:
   Low-Qubit variant : PA <= 2,700,000 Toffoli, <= 1,175 qubits, <= 17,000,000 ops
                       -> ECDLP <= 90,000,000 Toffoli, <= 1,200 qubits
   Low-Gate  variant : PA <= 2,100,000 Toffoli, <= 1,425 qubits, <= 17,000,000 ops
@@ -80,8 +87,11 @@ PA_TOF = score["metrics"]["toffoli"]         # Toffoli per point addition (measu
 PA_QUBITS = score["metrics"]["qubits"]       # total qubits per point addition (measured)
 PA_TOF_DEPTH = depth["toffoli_depth"]        # non-Clifford critical path (measured)
 
-# ----------------------- PAPER'S PUBLISHED ZK BOUNDS -----------------------
-# (arXiv:2603.28846v2, Appendix A, ZK Proof Statements 1 & 2)
+# ------------------- BABBUSH PA OPERATING POINTS (baseline) ----------------
+# Challenge reference numbers for the Babbush et al. 2026 line of work
+# (arXiv:2603.28846v2). The paper's PUBLIC headline is the full-ECDLP totals;
+# these per-PA Pareto points' exact source (paper table vs organizer-supplied)
+# is to be pinned before submission — see the NOTE in the module docstring (F7).
 PAPER = {
     "low-qubit": {"pa_tof": 2_700_000, "pa_qubits": 1_175, "pa_ops": 17_000_000,
                   "ecdlp_tof": 90_000_000, "ecdlp_qubits": 1_200},
@@ -150,12 +160,12 @@ print(f"  PA Toffoli        : {PA_TOF:,}")
 print(f"  PA qubits (total) : {PA_QUBITS:,}")
 print(f"  PA Toffoli-depth  : {PA_TOF_DEPTH:,}")
 
-section("vs PAPER'S ZK-PROVEN POINT-ADDITION BOUNDS (Appendix A, Statements 1 & 2)")
+section("vs BABBUSH PA OPERATING POINTS (challenge reference numbers; source TBD, F7)")
 print(f"  {'variant':>10} | {'PA Toffoli':>12} | {'PA qubits':>9} | this repo beats?")
 for name, p in PAPER.items():
     beats = "YES (all axes)" if (PA_TOF <= p["pa_tof"] and PA_QUBITS <= p["pa_qubits"]) else "no"
     print(f"  {name:>10} | {p['pa_tof']:>12,} | {p['pa_qubits']:>9,} | {beats}")
-print(f"  -> measured PA {PA_TOF:,} Tof / {PA_QUBITS:,} q is under BOTH published bounds.")
+print(f"  -> measured PA {PA_TOF:,} Tof / {PA_QUBITS:,} q is under BOTH operating points.")
 
 section("FULL ECDLP via the paper's closed form  ECDLP=(PA+3*2^w)(2n/w-4)")
 co = A["completeness_overhead"]

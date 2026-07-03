@@ -23,7 +23,7 @@ loop of Shor's algorithm applied to the elliptic-curve discrete-log problem
 (ECDLP), i.e. the computation that breaks ECDSA (Bitcoin/Ethereum keys). It is
 scored by `round(avg_toffoli_per_shot) × qubits` (`src/bin/eval_circuit.rs:434`),
 where "Toffoli" counts CCX+CCZ executions (`src/sim.rs:86`) and "qubits" is the
-maximum allocated qubit id + 1 (`src/circuit.rs:356`). Current metrics
+maximum allocated qubit id + 1 (`analyze_ops` in `src/circuit.rs`). Current metrics
 (`score.json`): **1,364,230 Toffoli × 1,152 qubits = 1,571,592,960**.
 
 This places the work in **quantum resource estimation**, a legitimate and
@@ -36,8 +36,8 @@ Sections 1–2 supply exactly those two missing pieces.
 Two senses of "cryptanalysis" pull apart here, and the honest answer differs:
 
 - **Cryptanalysis as *breaking* — no contribution.** There is no new attack, no
-  reduced qubit/gate frontier (the primitive is `1152` q; the frontier is
-  Chevignard's `1098` and dropping), and no structural weakness exposed in
+  reduced qubit/gate frontier (the primitive is `1152` q; the P-256 frontier is
+  Chevignard's `1193` — their `1098` is P-224 — and dropping), and no structural weakness exposed in
   secp256k1. The hardness of the ECDLP is untouched; ECDSA is exactly as safe as
   before.
 - **Cryptanalysis as *resource estimation / threat assessment* — a narrow but real
@@ -50,9 +50,23 @@ Two senses of "cryptanalysis" pull apart here, and the honest answer differs:
   occurrences of SMT/z3/model-checking or an explicit point-at-infinity treatment in
   any of them). This repo instead **machine-checks** the load-bearing arithmetic over
   all inputs (z3 + Kani on the real `alloy` U256 type, §1) and turns completeness from
-  a cited argument into a **computed + circuit-verified** result (`≈2⁻²⁵⁰` exact bound,
-  reversible real-coordinate detector — see `completeness_argument.md`,
+  a cited argument into a **computed + circuit-confirmed** result (`≈2⁻²⁵⁰` bound —
+  exact at toy scale, an analytic union upper bound at attack scale — plus a
+  reversible real-coordinate detector; see `completeness_argument.md`,
   `ec_exceptional.rs`).
+
+  > **Scope of "machine-checks" and "computed + circuit-confirmed" (referee
+  > F1/F2/F4/F5, ADR 0026).** These verbs are load-bearing, so state exactly what
+  > they cover. The z3/Kani layer proves the *integer identity* of the **plain**
+  > `mod_add_qq` (and Kani proves a hand-written re-implementation, not the
+  > gate-emitting builder); the scored circuit's hot path emits the **`_fast`
+  > measurement-based** variant (`cuccaro_add_fast` + `hmr`/`cz_if`), whose phase
+  > logic is validated only by the 9024-shot sample (§1c). The completeness bound
+  > is exact only on toy curves; at attack scale it is the analytic union bound.
+  > The "demonstrated recovery" runs a *model* adder in Python, not the scored
+  > circuit (§4). So the honest reading is: a machine-checked **integer core** and
+  > a **simulation-backed** completeness argument — narrower than the bare verbs
+  > suggest, and deliberately re-scoped here.
 
 So the deliverable is not a break but a **standard of evidence**: a template showing
 that "X qubits, Y Toffoli" estimates *can* be machine-checked and
@@ -93,7 +107,7 @@ rather than sampled.
 ### 1b. Peephole, adder, and comparator invariants
 
 `peephole_identities.py` proves the boolean claims behind the gate-level
-optimizations (`22/22 lemmas PROVED`):
+optimizations (`26/26 lemmas PROVED`):
 
 | Claim | Source | Theorem |
 |---|---|---|
@@ -103,8 +117,13 @@ optimizations (`22/22 lemmas PROVED`):
 | FoldEqualCtrls | `constprop.rs` | `a=b ⇒ CCX(a,b,t)=t⊕a` |
 | DropComplementCtrls | `constprop.rs` | `a=¬b ⇒ CCX(a,b,t)=t` |
 | InversePairCancellation | `constprop.rs` | `CCX;CCX (controls/target unchanged) = I` |
-| Ripple-carry recurrence | `venting.rs`, `arith/adder.rs` | carry chain `= (a+b) mod 2^w`, w∈{1..64} |
-| Borrow-chain comparator | `comparator.rs` | final borrow `= (a <ᵤ b)`, w∈{1..64} |
+| Ripple-carry recurrence | `venting.rs`, `arith/adder.rs` | carry chain `= (a+b) mod 2^w`, w∈{1..64, **256, 257**} |
+| Borrow-chain comparator | `comparator.rs` | final borrow `= (a <ᵤ b)`, w∈{1..64, **256, 257**} |
+
+The `256`/`257` widths are the **production** register sizes (256-bit
+coordinates; the 257-bit Solinas extended register), so the adder and comparator
+recurrences are proved *at* the width the scored circuit runs — not extrapolated
+from ≤64-bit instances (referee finding F3, [ADR 0024](adr/0024-z3-production-width-adder-proof.md)).
 
 The affine-form analysis in `constprop.rs` (`FoldEqualCtrls`/`DropComplement`)
 proves two controls are *always* equal/opposite over GF(2); the z3 lemma
@@ -128,6 +147,20 @@ cargo kani --harness solinas_add_u256   VERIFICATION: SUCCESSFUL  (0 of 139 fail
   real U256 values, against the **real secp256k1 prime** (`SECP256K1_P`), and
   proves it equals a division-free ground truth for all `a,b ∈ [0,p)`.
 - `solinas_add_u64` is a fast small-width twin proving the control flow itself.
+
+> **What "binding to the real types" does and does not cover (referee F1/F2,
+> ADR 0026).** `solinas_add_u256` uses the real `U256`/`SECP256K1_P`, but it is a
+> **hand-written re-implementation** of the control flow ("on plain integers
+> instead of emitted gates", `kani_proofs.rs`) — Kani proves *that function*, not
+> the gate-emitting `mod_add_qq` builder, so a drift between the two would not be
+> caught. And both z3 and Kani model the **plain** `mod_add_qq`; the scored
+> circuit's hot path emits `mod_add_qq_fast` (58 call sites vs 3 for the plain
+> variant), a `cuccaro_add_fast` with **measurement-based uncompute** (`hmr` +
+> `cz_if` phase-kickback) whose phase logic these proofs do not model. That layer
+> is covered by the 9024-shot sample, not by the formal proofs. The machine-checked
+> guarantee is therefore an **integer-identity** guarantee on the plain adder at
+> production width (256/257, ADR 0024, PR #64), not a gate-level proof of the emitted
+> measurement-based circuit.
 
 A useful negative result: a harness over the real `sub_mod` (which calls ruint's
 256-bit `%`) does **not** converge — Knuth long division has data-dependent loops
@@ -351,10 +384,15 @@ circuit (one point addition):
   end-to-end.
 
 **Key limitations this surfaces** (all real, all worth fixing):
-- The scored "qubits" is `max_id + 1` (total allocated ids), **not peak
-  simultaneous width** — the README's "peak qubits" is inaccurate
-  (`circuit.rs:356`). A metric that rewarded true peak width would better track
-  physical qubit count.
+- The scored "qubits" is `max_id + 1` (highest allocated id + 1, computed by
+  `analyze_ops` in `src/circuit.rs`).
+  This *equals* peak simultaneous width **because the builder reuses freed qubit
+  ids** — the `ladder_composition` test measures peak flat at 1152 (Δ=0) across
+  chained additions, i.e. ancilla ids are recycled, so `max_id+1` tracks the true
+  peak rather than the running total. So the README's "peak qubits" label is
+  accurate for this circuit (referee finding F8). The residual caveat is only
+  structural: `max_id+1` would *over-count* (not under-count) for a builder that
+  never recycled ids, so it is a conservative proxy, never an optimistic one.
 - ~~No depth / T-depth is tracked~~ **RESOLVED**: `circuit::analyze_depth` +
   `depth_report` now measure toffoli-depth and gate-depth (critical path over
   read/write hazards), feeding measured runtime and spacetime volume into the

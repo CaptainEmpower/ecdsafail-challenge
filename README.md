@@ -70,7 +70,7 @@ run fail, not faster.
 | Google's private low-gate Pareto point | 2,100,000 | 1,425 | 3.0 × 10⁹ |
 
 We've run a research loop that has cut the score by ~33× from the textbook baseline.
-The published Pareto frontier sits roughly **3× lower still**. We believe
+That private Pareto frontier sits roughly **3× lower still**. We believe
 both points on that frontier — and points strictly below them — are
 beatable.
 
