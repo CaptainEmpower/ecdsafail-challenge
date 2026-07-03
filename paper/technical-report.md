@@ -28,9 +28,11 @@ which the 9024-shot sample covers. The affine adder's exceptional cases are boun
 (exactly at toy scale), confirmed by a reversible detector over real coordinates,
 and — the payload — shown **sufficient at toy scale** by a demonstrated end-to-end
 discrete-log recovery (exact statevector Shor-ECDLP that recovers the secret using a
-model of the incomplete adder + this handling). We position this as a *rigor and
-reproducibility* contribution orthogonal to the algorithmic frontier, not a smaller
-estimate.
+deterministic Python **model** of the incomplete adder + this handling — *not the
+scored circuit itself, which exhibits probabilistic phase corruption on the `dx=0`
+exceptional inputs and is not run through the recovery pipeline*). We position this
+as a *rigor and reproducibility* contribution orthogonal to the algorithmic
+frontier, not a smaller estimate.
 
 ## 1. Result summary (measured)
 
@@ -107,7 +109,7 @@ tracked as referee finding F7, issue #61.)*
 - Demonstrated attack (toy-scale recovery): `analysis/verify/shor_ecdlp_recovery.py`.
 - Full-ladder measurement: `src/point_add/{ladder_full,ladder_stream}.rs`,
   `analysis/ladder_measured.json`, `analysis/ecdlp_estimate.py`.
-- Design rationale: `analysis/adr/` (ADRs 0001–0021), `analysis/scientific-value.md`.
+- Design rationale: `analysis/adr/` (ADRs 0001–0026), `analysis/scientific-value.md`.
 
 ## 4. Reproducibility
 
