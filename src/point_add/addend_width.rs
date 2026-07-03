@@ -41,16 +41,26 @@
 //! repo spent its width budget on a product-min GCD and stayed under bound by
 //! keeping the addend classical — an advantage that a faithful port would erase.
 //!
-//! ## What this harness measures (machine-checked)
+//! ## What this harness checks — and what carries the conclusion
 //!
-//! It builds the scored circuit and CONSTRUCTS the resident-addend port by shifting
-//! every qubit id up by the addend width `Δ` (placing a held `Δ`-qubit addend
-//! register at ids `[0, Δ)`, loaded/uncomputed at the ends), then measures the port
-//! peak via `analyze_ops`. Because the scored peak is tight (free list empty at the
-//! peak), the port peak is exactly `PA_Qubits + Δ` — the addend adds its full
-//! width, confirming it cannot hide under the peak. This is the concrete,
-//! reproducible version of ladder_full.rs's flagged "disjoint-emit over-counts"
-//! caveat, turned into the actual quantum-addend width.
+//! `analyze_ops(..).0` is the **allocation span** (`max qubit id + 1`), NOT a
+//! live/peak-active count. So this harness does not *independently* measure a
+//! peak: it builds the scored circuit and CONSTRUCTS a resident-addend port by
+//! shifting every qubit id up by the addend width `Δ` (placing a held `Δ`-qubit
+//! addend register at ids `[0, Δ)`, loaded/uncomputed at the ends). Its span is
+//! then `PA_span + Δ` essentially by construction — the harness only confirms the
+//! span *bookkeeping* (a held `Δ`-qubit register that cannot reuse a freed id adds
+//! exactly `Δ` ids; the `NO_QUBIT` sentinel is preserved under the shift).
+//!
+//! The substantive **peak** conclusion — that a resident quantum addend raises the
+//! *peak active* qubit count by its full width — rests on the separately-**measured
+//! profiler fact** quoted above: the scored build's peak active (`1152`) equals its
+//! max qubit id (`analyze_ops` = `score.json` qubits = `1152`). That equality means
+//! the peak is *tight* (the free list is empty at the peak), so a register that
+//! must stay live across the peak has no freed slot to reuse and therefore adds new
+//! ids to the peak, not just to the span. The harness is the reproducible span-side
+//! of ladder_full.rs's flagged "disjoint-emit over-counts" caveat; the tight-peak
+//! profiler measurement is what turns a span delta into a peak delta.
 //!
 //! `#[cfg(test)]` only; never compiled into the scored circuit.
 
@@ -70,7 +80,9 @@ fn shift_q(q: QubitId, delta: u64) -> QubitId {
 /// across the WHOLE addition: place it at ids `[0, delta)` and run the scored
 /// circuit on ids shifted up by `delta`. An `X` on each addend qubit at the start
 /// (QROM load) and end (uncompute) makes the register live end-to-end. The port's
-/// peak width is then `analyze_ops(port).0`.
+/// allocation span is then `analyze_ops(port).0` (= max qubit id + 1), which is
+/// `PA_span + delta` by construction — see the module note on why, given the
+/// measured tight peak, this span delta is also a peak-active delta.
 fn resident_addend_port(scored: &[Op], delta: u64) -> Vec<Op> {
     let mut out: Vec<Op> = Vec::with_capacity(scored.len() + 2 * delta as usize);
     let x = |t: u64| {
@@ -117,18 +129,19 @@ fn quantum_addend_width_gap() {
     let port_both_full = q_both + W;
 
     eprintln!("\n=== issue #27 quantum-addend WIDTH gap (A2) ===");
-    eprintln!("  scored PA peak (measured)            : qubits={pa_qubits}");
-    eprintln!("    (= score.json qubits; == profiler peak active, so the peak is tight:");
-    eprintln!("     free list empty at the peak -> a resident addend cannot reuse a slot)");
+    eprintln!("  scored PA span (analyze_ops = max id + 1) : qubits={pa_qubits}");
+    eprintln!("    (= score.json qubits, and separately == profiler peak ACTIVE, so the");
+    eprintln!("     peak is tight: free list empty at the peak -> a resident addend held");
+    eprintln!("     across the peak cannot reuse a freed slot, so a span delta is a peak delta)");
     eprintln!("  classical addend: resident only off-peak (coord steps ~1026 < {pa_qubits} peak),");
     eprintln!("    re-loaded+freed per step -> never coexists with the GCD scratch.");
     eprintln!("  quantum addend (QROM P[k]) must straddle the peak (ox@3/7/15, oy@4/14):");
-    eprintln!("    hold one coord  : port peak={q_one}  (= PA + {N})");
+    eprintln!("    hold one coord  : port span={q_one}  (= PA + {N})");
     eprintln!(
-        "    hold P[k]=(x,y) : port peak={q_both}  (= PA + {})",
+        "    hold P[k]=(x,y) : port span={q_both}  (= PA + {})",
         2 * N
     );
-    eprintln!("  A2 headline PA+w = {a2};  measured quantum-addend port = {port_one_full}..{port_both_full} (+w)");
+    eprintln!("  A2 headline PA+w = {a2};  quantum-addend port span = {port_one_full}..{port_both_full} (+w)");
     eprintln!(
         "  => A2's `+w only` UNDERCOUNTS this classical-addend PA by {N}..{} qubits.",
         2 * N
@@ -138,18 +151,21 @@ fn quantum_addend_width_gap() {
         "      stayed under bound by keeping the addend classical — a port would erase that.)"
     );
 
-    // Machine-checked findings:
-    // (1) The addend adds its FULL width on top of the peak — it cannot overlap the
-    //     GCD scratch (both live at the peak), so the port peak is exactly PA + Δ.
+    // Checked findings (span bookkeeping; the peak conclusion is argued from the
+    // tight-peak profiler equality documented in the module note above):
+    // (1) A held Δ-qubit addend register adds its full width to the allocation span
+    //     PA + Δ. Given the measured tight peak (peak active == max id == PA), this
+    //     span delta is also a peak-active delta — the addend cannot overlap the
+    //     GCD scratch, since both must be live across the (already full) peak.
     assert_eq!(
         q_one,
         pa_qubits + N,
-        "holding one coordinate did not add its full {N} qubits (unexpected overlap)"
+        "holding one coordinate did not add its full {N} qubits to the span"
     );
     assert_eq!(
         q_both,
         pa_qubits + 2 * N,
-        "holding P[k]=(x,y) did not add its full {} qubits",
+        "holding P[k]=(x,y) did not add its full {} qubits to the span",
         2 * N
     );
     // (2) The quantum-addend width therefore exceeds A2's PA+w by at least one

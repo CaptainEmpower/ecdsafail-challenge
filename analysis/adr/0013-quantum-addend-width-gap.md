@@ -23,11 +23,14 @@ measurement.
 
 ## Decision
 
-Measure the quantum-addend peak width by construction
+Establish the quantum-addend width by construction plus one measured fact
 (`src/point_add/addend_width.rs`, `#[cfg(test)]`, `#[ignore]`): build the scored
 circuit and construct the resident-addend port by shifting every qubit id up by
 the addend width `Δ` (placing a held `Δ`-qubit addend register at ids `[0, Δ)`),
-then measure the port peak via `analyze_ops`.
+then read the port's **allocation span** via `analyze_ops` (= `max qubit id + 1`).
+The span is `PA_span + Δ` by construction; the *peak* consequence follows from the
+separately-measured tight-peak fact below, not from `analyze_ops` alone (which is
+a span, not a live-peak, metric).
 
 ## Consequences
 
@@ -48,13 +51,16 @@ then measure the port peak via `analyze_ops`.
   `score.json` qubits) equals the profiler's peak active (1152), so the free list
   is empty at the peak and there is no slot to reuse.
 
-- **Measured port widths** (`quantum_addend_width_gap`, machine-checked):
-  | model | port peak | vs PA |
+- **Port allocation spans** (`quantum_addend_width_gap`; the span delta is a
+  peak delta given the tight peak above):
+  | model | port span | vs PA |
   |---|---|---|
   | scored PA (classical addend) | 1152 | — |
   | hold one coordinate (lower bound) | **1408** | + 256 |
   | hold `P[k]=(x,y)` | **1664** | + 512 |
-  The addend adds its **full** width — confirming zero overlap with the peak.
+  A held addend register adds its **full** width to the span; because the peak is
+  tight (free list empty), it cannot overlap the GCD scratch, so this is also the
+  peak growth.
 
 - **So A2's `+w` undercounts THIS PA.** `ECDLP_Qubits = PA_Qubits + w` = 1168;
   the measured quantum-addend port is `PA_Qubits + (256..512) + w` ≈ **1408..1664
