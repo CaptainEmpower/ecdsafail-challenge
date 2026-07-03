@@ -45,9 +45,22 @@ from completeness_collision_rate import INF, Curve, _is_prime  # noqa: E402
 # Small prime-order toy curve (so <P> ≅ Z_n and every point has a dlog).
 # --------------------------------------------------------------------------- #
 
+# Pinned, once-searched known-good toy curves per order — deterministic fallbacks so
+# the `toyshor` stage (run unconditionally in `just analysis`) can never abort if the
+# bounded search grid below is ever tightened/regressed. Each is a PRIME-order group,
+# so any non-identity point is a generator; the fixed base is validated at use
+# (order matches, prime, generator on-curve), mirroring `_PINNED_CURVE` in
+# completeness_collision_rate.py, so a silently-wrong pin fails loudly.
+_PINNED_CURVES = {
+    7: (7, 0, 5, (3, 2)),    # y²=x³+5 / F_7,     prime order 7
+    11: (11, 1, 5, (0, 4)),  # y²=x³+x+5 / F_11,  prime order 11
+}
+
+
 def small_prime_order_curve(order):
     """First curve y²=x³+ax+b / F_p with the requested prime group order; returns
-    (curve, generator, n). Raises if none found (loud failure, not a silent skip)."""
+    (curve, generator, n). Falls back to a pinned known-good curve (validated at use)
+    if the bounded search misses, so this unconditional analysis stage cannot abort."""
     for p in range(5, 80):
         if not _is_prime(p) or p % 4 != 3:
             continue
@@ -61,7 +74,20 @@ def small_prime_order_curve(order):
                     c.order = n
                     gen = next(pt for pt in c.points() if pt is not INF)
                     return c, gen, n
-    raise RuntimeError(f"no prime-order-{order} toy curve found")
+
+    # Deterministic fallback: unreachable with today's fixed grid, but guarantees the
+    # stage keeps working if the grid is ever narrowed. Validate the pin explicitly
+    # (not via `assert`, which `python -O` strips) so a bad pin fails loudly here.
+    if order not in _PINNED_CURVES:
+        raise RuntimeError(f"no prime-order-{order} toy curve found (and no pinned fallback)")
+    p, a, b, gen = _PINNED_CURVES[order]
+    c = Curve(p, a, b)
+    c.order = order
+    if not _is_prime(order) or len(c.points()) != order:
+        raise RuntimeError(f"pinned order-{order} curve is not that prime-order group")
+    if gen is INF or not c.is_on(gen):
+        raise RuntimeError(f"pinned order-{order} generator is off-curve or the identity")
+    return c, gen, order
 
 
 # --------------------------------------------------------------------------- #

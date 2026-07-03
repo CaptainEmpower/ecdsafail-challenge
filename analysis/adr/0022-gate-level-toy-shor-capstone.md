@@ -2,8 +2,9 @@
 
 **Status:** Accepted — implemented in `analysis/verify/toy_shor_qft.py` (gate-level QFT
 recovery) plus the `gate_level_ladder_matches_group_law` `#[cfg(test)]` test in
-`src/point_add/toy_pointadd.rs` (the complete point-add chained as a gate-level ladder
-oracle). The "further stretch" called out in [ADR 0021](0021-reversible-lambda-division-point-add.md) §4.
+`src/point_add/toy_shor.rs` (the complete point-add chained as a gate-level ladder
+oracle; a child module of `toy_pointadd` so it reuses that adder's internals). The
+"further stretch" called out in [ADR 0021](0021-reversible-lambda-division-point-add.md) §4.
 Depends on [ADR 0019](0019-end-to-end-ecdlp-recovery.md), [ADR 0021](0021-reversible-lambda-division-point-add.md).
 **Date:** 2026-07-03
 
@@ -65,8 +66,9 @@ Two artifacts, unified:
      curves (order 7, `w=7`, `m=3`; order 11, `w=8`, `m=4`); distribution norm `1.0`;
      `P(correct m)` ≈ 0.84 / 0.89 over all informative outcomes.
 
-2. **`gate_level_ladder_matches_group_law`** (Rust `#[cfg(test)]`, `toy_pointadd.rs`) —
-   grounds the "arithmetic oracle" the Python relies on. It builds `[a]P + [b]Q` by
+2. **`gate_level_ladder_matches_group_law`** (Rust `#[cfg(test)]`, `src/point_add/toy_shor.rs`,
+   a child module of `toy_pointadd`) — grounds the "arithmetic oracle" the Python relies
+   on. It builds `[a]P + [b]Q` by
    **chaining the ADR 0021 complete point-add** as a gate-level ladder on the bit-sliced
    sim (`emit_point_add` per step, accumulator threaded register-to-register, constants
    loaded via `load_const`), then asserts the sim readback equals the reference group law
