@@ -144,8 +144,9 @@ class SymSim:
             self._qval[qt] = Xor(self.q(qt), And(cond, self.q(qc1)))
         elif kind == "X":
             self._qval[qt] = Xor(self.q(qt), cond)
-        elif kind == "Swap":
+        elif kind == "SWAP":
             # Faithful to sim.rs's conditional 3-XOR swap of (q_control1, q_target).
+            # Canonical op name is uppercase "SWAP" (circuit.rs::from_name / mbuc_dump.rs).
             q_c1 = Xor(self.q(qc1), self.q(qt))          # q_c1 ^= q_t
             q_t = Xor(self.q(qt), And(cond, q_c1))        # q_t  ^= cond & q_c1
             q_c1 = Xor(q_c1, q_t)                         # q_c1 ^= q_t

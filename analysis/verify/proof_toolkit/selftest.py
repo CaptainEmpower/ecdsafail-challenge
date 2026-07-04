@@ -34,7 +34,7 @@ def X(tgt, cc=-1):
 
 
 def SWAP(a, b):
-    return ["Swap", -1, a, b, -1, -1]
+    return ["SWAP", -1, a, b, -1, -1]  # canonical uppercase name (matches the emitter)
 
 
 def CZ(c1, tgt, cc=-1):
