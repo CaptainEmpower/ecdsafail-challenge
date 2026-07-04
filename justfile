@@ -42,11 +42,11 @@ test:
 
 # ── analysis: scientific-rigor suite (z3 proofs + cost model) ───────────────
 
-# Full 15-stage analysis suite (formal proofs + physical cost model).
-# `solinas-emitted` is a separate recipe (like `kani`): it is a real proof but ~5 min
-# (256-bit emitted-gate replay), far heavier than the other z3 stages, so it is kept
-# out of the default suite. Run it explicitly: `just solinas-emitted`.
-analysis: toolkit solinas peephole mbuc refadders controlled-lookup lookup-cost completeness direct-lookup offset mid-ladder recover toyshor cost-model ecdlp
+# Full 16-stage analysis suite (formal proofs + physical cost model).
+# The heavy emitter-gate replays (`solinas-emitted`, `mod-fast-emitted`) are separate
+# recipes (like `kani`) — real proofs but minutes each — kept out of the default suite.
+# `scored-add` is light (~5 s) and included.
+analysis: toolkit solinas peephole mbuc scored-add refadders controlled-lookup lookup-cost completeness direct-lookup offset mid-ladder recover toyshor cost-model ecdlp
 
 # Byte-compile all analysis python — catches version-incompatible syntax. To
 # reproduce CI's 3.11-floor guard exactly, pass a 3.11 interpreter:
@@ -67,6 +67,12 @@ toolkit:
 solinas:
     @echo "### Solinas modular-reduction proof — step-for-step model (z3) ###"
     cd analysis && {{PYTHON}} verify/solinas_reduction.py
+
+# The SCORED trailmix adder (hybrid_add_adaptive) proved over its emitted gates
+# (z3, ADR 0036) — binds a proof to gates ops.bin actually runs. Light (~5 s).
+scored-add:
+    @echo "### Scored trailmix adder over the EMITTED gates (z3, ADR 0036) ###"
+    cd analysis && {{PYTHON}} verify/scored_add_emitted.py
 
 # Solinas reduction proved over the REAL emitted mod_add_qq op-stream (ADR 0031, F2):
 # the emitter-bound complement to `solinas` and the Kani twin. ~5 min (256-bit gate
