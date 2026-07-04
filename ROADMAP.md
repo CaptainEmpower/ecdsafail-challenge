@@ -33,11 +33,13 @@ for a current claim; each is an optional strengthening.
   group law (does not scale in either solver). The composition into a full
   point-add stays guarded by the 9024-shot sample.
   Detail: `analysis/scientific-value.md` §1 Scope/honesty + §4.
-- [ ] **(Optional) Kani harness bound to the *emitter*, not a copy.** ADR 0027
-  closed the emitted-fast-adder *phase* gap in z3 with a drift guard; a Kani
-  harness that drives the gate-emitting builder directly (rather than the
-  hand-written integer twin `src/kani_proofs.rs` proves) would remove the last
-  copy↔emitter gap for the Solinas path. Detail: ADR 0026 (F1/F2 note),
+- [x] **(Optional) Kani harness bound to the *emitter*, not a copy.** Done —
+  ADR 0030. `src/point_add/mbuc_kani.rs` drives the real `B` builder + real
+  `Simulator` for `cuccaro_add_fast`, proving functional/clean/phase-clean over
+  all inputs and all measurement outcomes at small width (`#[kani::proof]`), with
+  an exhaustive `#[cfg(test)]` shadow at widths 2/3/4 in `cargo test`. Honest
+  scope: binds to the real emitter/types at small width — not production 256
+  (BMC-intractable; that width is the z3 layer's job, ADR 0027). Detail: ADR 0030,
   `paper/REVIEW.md` F2.
 - [ ] **Pre-submission: pin the exact source for the PA Pareto operating
   points.** The `2.7M/1175` and `2.1M/1425` point-addition numbers are used as
@@ -57,6 +59,13 @@ detail lives in the ADR trail (`analysis/adr/`, index at
   ADR 0024), plus a z3 proof of the emitted `_fast` adder's measurement-based
   uncompute ([#57](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/57),
   ADR 0027). ADR 0001–0005, 0024, 0027.
+- **Emitter-bound proofs — the copy↔emitter gap (referee F2) closed on both the
+  adder and the reduction.** The emitted `cuccaro_add_fast` adder is proved in z3
+  over its op-stream (ADR 0027) and by a Kani harness driving the real `B` builder
+  + `Simulator` (ADR 0030); the emitted `mod_add_qq` **Solinas reduction** is proved
+  in z3 over its op-stream at production 256-bit width (ADR 0031). The step-for-step
+  model (ADR 0024) and the Kani integer twin become independent cross-checks rather
+  than the sole binding. All reuse the `proof_toolkit` methodology (ADR 0028/0029).
 - **Tier B — the full ECDLP ladder emitted + measured end-to-end**
   ([#4](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/4)):
   windowed QROM lookup cost measured (ADR 0010), full ladder stream-emitted and
@@ -79,6 +88,13 @@ detail lives in the ADR trail (`analysis/adr/`, index at
 - **Reproducible analysis env** — uv-managed, hash-pinned
   ([#51](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/51)); build
   warnings addressed ([#7](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/7)).
+- **Reusable proof toolkit** ([#70](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/70),
+  ADR 0028 scope + ADR 0029 build): the verification *methodology* — the
+  generalized z3 `src/sim.rs` op-stream replayer — extracted from ADR 0027 into
+  `analysis/verify/proof_toolkit/` (`just toolkit` self-test), with
+  `mbuc_phase_correction.py` refactored onto it byte-identical. The
+  score-specialized primitives are deliberately **not** carved out (ADR 0028); a
+  clean-room primitive crate stays deferred until a second consumer exists.
 
 ---
 

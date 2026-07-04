@@ -34,145 +34,80 @@ corrections makes claim (3) FALSE (z3 finds an input+outcome with net phase 1).
 Widths 2..256 (incl. the production 256-bit coordinate register). z3 discharges each by
 returning `unsat` on the negation — a proof over all inputs and all measurement outcomes,
 not a sample. Analysis-only; `#[cfg(test)]`-equivalent, never touches the scored circuit.
+
+The symbolic sim.rs replayer this proof drives is the reusable `proof_toolkit` package
+(ADR 0028/0029, extracted from this proof's original private replay); this script is now
+its first consumer — it states the adder-specific claims, the toolkit owns the op
+semantics.
 """
-import json
 import os
 import sys
 
-from z3 import And, Bool, BoolVal, Not, Or, Solver, Xor, sat, unsat
+from z3 import Bool, BoolVal
+
+# `proof_toolkit` lives alongside this script in analysis/verify/; make it importable
+# whether the script is run from analysis/ (the justfile CWD) or from verify/.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from proof_toolkit import (  # noqa: E402
+    load_streams,
+    replay,
+    require_proved,
+    require_teeth,
+    ripple_carry_sum,
+)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPS_JSON = os.path.join(HERE, os.pardir, "mbuc_fast_adder_ops.json")
 
+# Dropping the `cz_if` phase corrections (emitted as CZ; Z included defensively) is the
+# teeth lever: without them the HMR kickback survives and the phase claim must break.
+_CZ_IF_KINDS = frozenset({"CZ", "Z"})
 
-def _maj(a, b, c):
-    """Boolean majority (carry-out of a full adder)."""
-    return Or(And(a, b), And(a, c), And(b, c))
 
+def _adder_inputs(stream):
+    """Free-input map for one emitted `cuccaro_add_fast` stream.
 
-def replay(width, drop_cz=False):
-    """Symbolically execute one emitted `cuccaro_add_fast` op-stream.
-
-    Returns (solver-free) the symbolic end state and the input handles needed to state
-    the claims: qubit values (dict id->Bool expr), the global `phase` Bool, the input
-    a/acc/c_in handles, the fresh measurement-outcome vars, and the ancilla ids.
-
-    `drop_cz=True` omits the `cz_if` phase corrections (the teeth variant)."""
-    n = width["n"]
-    a_ids, acc_ids, c_in_id = width["a"], width["acc"], width["c_in"]
-    ops = width["ops"]
-
-    # Qubit initial state: a[], acc[] free inputs; c_in and every ancilla start at |0>.
+    `a[]` and `acc[]` are free boolean inputs; `c_in` and every carry ancilla start
+    at |0> (omitted ⇒ the toolkit defaults them to False — the documented
+    precondition that `c_in` is a fresh |0> ancilla)."""
+    n = stream["n"]
     a_in = [Bool(f"a{i}") for i in range(n)]
     acc_in = [Bool(f"acc{i}") for i in range(n)]
-    qval = {}
-    for i, qid in enumerate(a_ids):
-        qval[qid] = a_in[i]
-    for i, qid in enumerate(acc_ids):
-        qval[qid] = acc_in[i]
-    qval[c_in_id] = BoolVal(False)  # documented precondition: c_in is a |0> ancilla
-
-    def q(qid):
-        return qval.get(qid, BoolVal(False))  # unseen ids are |0> ancilla
-
-    bits = {}
-
-    def b(bid):
-        return bits.get(bid, BoolVal(False))
-
-    phase = BoolVal(False)
-    meas = []  # fresh measurement-outcome vars (universally quantified)
-    mcount = 0
-
-    for op in ops:
-        kind, qc2, qc1, qt, ct, cc = op
-        cond = BoolVal(True) if cc < 0 else b(cc)
-        if kind == "CX":
-            qval[qt] = Xor(q(qt), And(cond, q(qc1)))
-        elif kind == "CCX":
-            qval[qt] = Xor(q(qt), And(cond, q(qc1), q(qc2)))
-        elif kind == "X":
-            qval[qt] = Xor(q(qt), cond)
-        elif kind == "CZ":
-            if not drop_cz:
-                phase = Xor(phase, And(cond, q(qt), q(qc1)))
-        elif kind == "Z":
-            if not drop_cz:
-                phase = Xor(phase, And(cond, q(qt)))
-        elif kind == "CCZ":
-            phase = Xor(phase, And(cond, q(qt), q(qc1), q(qc2)))
-        elif kind == "NEG":
-            phase = Xor(phase, cond)
-        elif kind == "HMR":
-            m = Bool(f"m{mcount}")
-            mcount += 1
-            meas.append(m)
-            # bit[ct] := m (cond true here); phase ^= q_target & m; q_target := 0.
-            bits[ct] = m if cc < 0 else Xor(And(Not(cond), b(ct)), And(cond, m))
-            phase = Xor(phase, And(q(qt), m, cond))
-            qval[qt] = And(q(qt), Not(cond))
-        elif kind == "R":
-            m = Bool(f"r{mcount}")
-            mcount += 1
-            meas.append(m)
-            phase = Xor(phase, And(q(qt), m, cond))
-            qval[qt] = And(q(qt), Not(cond))
-        else:
-            raise AssertionError(f"unmodeled op kind {kind}")
-
-    ancilla_ids = [qid for qid in qval if qid not in a_ids and qid != c_in_id and qid not in acc_ids]
-    return {
-        "n": n,
-        "a_in": a_in,
-        "acc_in": acc_in,
-        "a_out": [q(qid) for qid in a_ids],
-        "acc_out": [q(qid) for qid in acc_ids],
-        "c_in_out": q(c_in_id),
-        "ancilla_out": [q(qid) for qid in ancilla_ids],
-        "phase": phase,
-        "meas": meas,
-    }
+    inputs = {}
+    for qid, val in zip(stream["a"], a_in):
+        inputs[qid] = val
+    for qid, val in zip(stream["acc"], acc_in):
+        inputs[qid] = val
+    return a_in, acc_in, inputs
 
 
-def expected_sum_bits(a_in, acc_in):
-    """Ripple-carry reference: (a + acc) mod 2^n, carry-in 0, bit by bit."""
-    carry = BoolVal(False)
-    out = []
-    for i in range(len(a_in)):
-        out.append(Xor(Xor(a_in[i], acc_in[i]), carry))
-        carry = _maj(a_in[i], acc_in[i], carry)
-    return out
+def prove_width(stream):
+    n = stream["n"]
+    a_ids, acc_ids, c_in_id = stream["a"], stream["acc"], stream["c_in"]
+    a_in, acc_in, inputs = _adder_inputs(stream)
 
+    st = replay(stream.ops, qubit_inputs=inputs)
 
-def prove_width(width):
-    n = width["n"]
-    st = replay(width)
-
-    # (1) FUNCTIONAL + (2) CLEAN + (3) PHASE-CLEAN — negate the conjunction, expect unsat.
-    ref = expected_sum_bits(st["a_in"], st["acc_in"])
+    # (1) FUNCTIONAL + (2) CLEAN + (3) PHASE-CLEAN — proved together (∀ inputs, ∀ outcomes).
+    ref = ripple_carry_sum(a_in, acc_in)
+    ancilla_ids = [
+        qid for qid in st.qubits if qid not in a_ids and qid not in acc_ids and qid != c_in_id
+    ]
     claims = []
-    claims += [st["acc_out"][i] == ref[i] for i in range(n)]              # functional
-    claims += [st["a_out"][i] == st["a_in"][i] for i in range(n)]          # a preserved
-    claims += [st["c_in_out"] == BoolVal(False)]                          # c_in clean
-    claims += [av == BoolVal(False) for av in st["ancilla_out"]]           # carries clean
-    claims += [st["phase"] == BoolVal(False)]                            # phase clean
+    claims += [st.q(acc_ids[i]) == ref[i] for i in range(n)]           # functional
+    claims += [st.q(a_ids[i]) == a_in[i] for i in range(n)]            # a preserved
+    claims += [st.q(c_in_id) == BoolVal(False)]                       # c_in clean
+    claims += [st.q(qid) == BoolVal(False) for qid in ancilla_ids]    # carries clean
+    claims += [st.phase == BoolVal(False)]                           # phase clean
+    require_proved(claims, f"width {n}")
 
-    s = Solver()
-    s.add(Not(And(*claims)))
-    res = s.check()
-    if res != unsat:
-        raise SystemExit(f"[FAIL] width {n}: claim not proved (z3 returned {res})")
+    # Teeth: without the cz_if corrections, phase-clean must FAIL (∃ input+outcome
+    # giving net phase 1).
+    st_no = replay(stream.ops, qubit_inputs=inputs, drop_phase_kinds=_CZ_IF_KINDS)
+    require_teeth(st_no.phase == BoolVal(True), f"width {n} teeth")
 
-    # Teeth: without the cz_if corrections, phase-clean must FAIL (sat: exists a
-    # counterexample input+outcome giving net phase 1).
-    st_no = replay(width, drop_cz=True)
-    t = Solver()
-    t.add(st_no["phase"] == BoolVal(True))
-    teeth = t.check()
-    if teeth != sat:
-        raise SystemExit(f"[FAIL] width {n}: teeth check did not fire (z3 {teeth})")
-
-    return len(st["meas"])
+    return len(st.meas)
 
 
 def main():
@@ -185,23 +120,23 @@ def main():
             f"missing {OPS_JSON}\n  regenerate: MBUC_OPS_JSON=analysis/mbuc_fast_adder_ops.json "
             "cargo test --release --lib mbuc_dump::dump_fast_adder_ops -- --ignored"
         )
-    data = json.load(open(OPS_JSON))
+    streams = load_streams(OPS_JSON)
     print()
-    print("  cuccaro_add_fast, replayed through a z3 model of src/sim.rs, measurement")
-    print("  outcomes free (∀), proving: add correct ∧ registers clean ∧ net phase 0.")
+    print("  cuccaro_add_fast, replayed through the proof_toolkit z3 model of src/sim.rs,")
+    print("  measurement outcomes free (∀), proving: add correct ∧ registers clean ∧ phase 0.")
     print()
-    for width in data["widths"]:
-        nmeas = prove_width(width)
+    for stream in streams:
+        nmeas = prove_width(stream)
         print(
-            f"  [PROVED] n={width['n']:>3}: acc'=(a+acc) mod 2^{width['n']}, "
+            f"  [PROVED] n={stream['n']:>3}: acc'=(a+acc) mod 2^{stream['n']}, "
             f"a/c_in/carries clean, phase=0 ∀ inputs ∧ ∀ {nmeas} outcomes; "
             f"teeth: drop cz_if ⇒ phase≠0 [sat]"
         )
     print()
     print("=" * 74)
-    print(f" RESULT: the emitted _fast adder's HMR + cz_if phase correction is PROVED")
-    print(f" phase-clean and functionally correct over all inputs and all measurement")
-    print(f" outcomes, at every width incl. the production 256 — the F1/F2 gap closed.")
+    print(" RESULT: the emitted _fast adder's HMR + cz_if phase correction is PROVED")
+    print(" phase-clean and functionally correct over all inputs and all measurement")
+    print(" outcomes, at every width incl. the production 256 — the F1/F2 gap closed.")
     print("=" * 74)
     return 0
 

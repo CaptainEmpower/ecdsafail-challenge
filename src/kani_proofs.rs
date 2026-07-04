@@ -10,8 +10,18 @@
 //! Solinas reduction (`mod_add_qq`, src/point_add/arith/modular/add.rs) using
 //! the real `alloy_primitives::U256` type.
 //!
+//! NOTE: the harnesses here prove a hand-written *twin* of `mod_add_qq` (a copy of
+//! its control flow on plain integers) — useful as an independent cross-check, but a
+//! copy. The emitter-bound proofs that close the copy↔emitter gap (referee F2) live
+//! elsewhere: `src/point_add/mbuc_kani.rs` drives the real `B` builder + `Simulator`
+//! for the adder (ADR 0030), and `analysis/verify/solinas_reduction_emitted.py` proves
+//! the full Solinas *reduction* over the emitted `mod_add_qq` op-stream (ADR 0031). So
+//! this twin is now corroborating evidence, not the sole binding for the reduction.
+//!
 //! Run:  cargo kani --harness solinas_add_u64
 //!       cargo kani --harness solinas_add_u256
+//!       cargo kani --harness mbuc_fast_adder_width2   (src/point_add/mbuc_kani.rs)
+//!       cargo kani --harness mbuc_fast_adder_width3   (src/point_add/mbuc_kani.rs)
 #![cfg(kani)]
 
 use crate::point_add::SECP256K1_P;
