@@ -251,12 +251,16 @@ def load_streams(path: str) -> list[OpStream]:
 
 
 # -- z3 claim helpers -------------------------------------------------------
-def prove(claims: list[BoolRef]):
+def prove(claims: list[BoolRef], assumptions: list[BoolRef] = ()):
     """Try to prove the conjunction of `claims` over all free vars.
 
-    Returns z3's result on the *negation*: `unsat` means proved (no input /
-    measurement outcome violates any claim); `sat` means a counterexample exists."""
+    `assumptions` are preconditions added to the solver (e.g. `a < p`, `acc < p`);
+    the claim is then proved *under* them. Returns z3's result on the negation of
+    the claims: `unsat` means proved (no input / measurement outcome satisfying the
+    assumptions violates any claim); `sat` means a counterexample exists."""
     s = Solver()
+    for a in assumptions:
+        s.add(a)
     s.add(Not(And(*claims)))
     return s.check()
 
@@ -271,9 +275,9 @@ def find(expr: BoolRef):
     return s.check()
 
 
-def require_proved(claims: list[BoolRef], label: str) -> None:
-    """Assert `claims` hold for all inputs/outcomes, else raise `SystemExit`."""
-    res = prove(claims)
+def require_proved(claims: list[BoolRef], label: str, assumptions: list[BoolRef] = ()) -> None:
+    """Assert `claims` hold for all inputs/outcomes (under `assumptions`), else raise."""
+    res = prove(claims, assumptions)
     if res != unsat:
         raise SystemExit(f"[FAIL] {label}: claim not proved (z3 returned {res})")
 

@@ -43,6 +43,9 @@ test:
 # ── analysis: scientific-rigor suite (z3 proofs + cost model) ───────────────
 
 # Full 15-stage analysis suite (formal proofs + physical cost model).
+# `solinas-emitted` is a separate recipe (like `kani`): it is a real proof but ~5 min
+# (256-bit emitted-gate replay), far heavier than the other z3 stages, so it is kept
+# out of the default suite. Run it explicitly: `just solinas-emitted`.
 analysis: toolkit solinas peephole mbuc refadders controlled-lookup lookup-cost completeness direct-lookup offset mid-ladder recover toyshor cost-model ecdlp
 
 # Byte-compile all analysis python — catches version-incompatible syntax. To
@@ -62,8 +65,15 @@ toolkit:
     cd analysis/verify && {{PYTHON}} -m proof_toolkit.selftest
 
 solinas:
-    @echo "### Solinas modular-reduction proof (z3) ###"
+    @echo "### Solinas modular-reduction proof — step-for-step model (z3) ###"
     cd analysis && {{PYTHON}} verify/solinas_reduction.py
+
+# Solinas reduction proved over the REAL emitted mod_add_qq op-stream (ADR 0031, F2):
+# the emitter-bound complement to `solinas` and the Kani twin. ~5 min (256-bit gate
+# replay); not part of `just analysis`. Needs the emitted artifact + z3.
+solinas-emitted:
+    @echo "### Solinas reduction over the EMITTED mod_add_qq gates (z3, ADR 0031, F2; ~5 min) ###"
+    cd analysis && {{PYTHON}} verify/solinas_reduction_emitted.py
 
 peephole:
     @echo "### Peephole / adder / comparator proofs (z3) ###"

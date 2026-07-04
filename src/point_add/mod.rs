@@ -83,6 +83,8 @@ mod mbuc_dump;
 #[cfg(any(test, kani))]
 mod mbuc_kani;
 #[cfg(test)]
+mod modadd_dump;
+#[cfg(test)]
 mod qaddend_testbed;
 #[cfg(test)]
 mod toy_field;
