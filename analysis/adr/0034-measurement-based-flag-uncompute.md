@@ -11,8 +11,9 @@ issue #77.
 
 ## Context
 
-The scored hot path runs 58 `mod_*_qq_fast` calls (ADR 0027/0032). Each does a Solinas
-reduction whose correctness `flag` (reduction-needed) must be uncomputed to keep the
+**Hypothesis going in (from ADR 0027/0032) — overturned by the measurement below.** The
+scored hot path was taken to run 58 `mod_*_qq_fast` calls. On that assumption, each does a
+Solinas reduction whose correctness `flag` (reduction-needed) must be uncomputed to keep the
 ancilla clean. The emitted `_fast` adder's carry uncompute is already measurement-based
 (HMR + `cz_if`, **0 Toffoli**, proven ADR 0027), so the Toffoli that remains in a
 `mod_*_qq_fast` is concentrated in the **flag uncompute** — the `cmp_lt`/`neg` machinery
