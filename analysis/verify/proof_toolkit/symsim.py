@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from z3 import And, Bool, BoolRef, BoolVal, Not, Or, Solver, Xor, sat, unsat
+from z3 import And, Bool, BoolRef, BoolVal, If, Not, Or, Solver, Xor, is_true, sat, unsat
 
 # Op-tuple field positions (mirrors `mbuc_dump.rs::ops_to_json`).
 _KIND, _QC2, _QC1, _QT, _CT, _CC = range(6)
@@ -145,13 +145,19 @@ class SymSim:
         elif kind == "X":
             self._qval[qt] = Xor(self.q(qt), cond)
         elif kind == "SWAP":
-            # Faithful to sim.rs's conditional 3-XOR swap of (q_control1, q_target).
+            # sim.rs's conditional 3-XOR swap `q_c1 ^= q_t; q_t ^= cond&q_c1; q_c1 ^= q_t`
+            # is exactly the exchange `(q_c1, q_t) := If(cond, (q_t, q_c1), (q_c1, q_t))`
+            # (verified algebraically). Emit that closed form instead of the nested XORs:
+            # for an unconditional swap it collapses to a plain exchange, keeping the
+            # symbolic expressions shallow (a 256-swap rotation stays a permutation of
+            # inputs, not a depth-256 XOR tree) — same semantics, far cheaper for z3.
             # Canonical op name is uppercase "SWAP" (circuit.rs::from_name / mbuc_dump.rs).
-            q_c1 = Xor(self.q(qc1), self.q(qt))          # q_c1 ^= q_t
-            q_t = Xor(self.q(qt), And(cond, q_c1))        # q_t  ^= cond & q_c1
-            q_c1 = Xor(q_c1, q_t)                         # q_c1 ^= q_t
-            self._qval[qc1] = q_c1
-            self._qval[qt] = q_t
+            a_val, b_val = self.q(qc1), self.q(qt)
+            if is_true(cond):
+                self._qval[qc1], self._qval[qt] = b_val, a_val
+            else:
+                self._qval[qc1] = If(cond, b_val, a_val)
+                self._qval[qt] = If(cond, a_val, b_val)
         elif kind == "CCZ":
             self._phase_xor(kind, And(cond, self.q(qt), self.q(qc1), self.q(qc2)))
         elif kind == "CZ":

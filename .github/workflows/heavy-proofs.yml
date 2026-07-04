@@ -1,0 +1,52 @@
+name: Heavy proofs (nightly)
+
+# The emitter-bound z3 proofs over the full 256-bit op-streams — the Solinas
+# reduction (`solinas-emitted`, ADR 0031) and the scored `_fast` modular wrappers
+# (`mod-fast-emitted`, ADR 0032) — take minutes each, so they are deliberately kept
+# OUT of the per-PR `verify` job (`just analysis`) and discharged here on a schedule.
+#
+# What each layer guarantees:
+#   - per-PR `cargo test` runs the DRIFT GUARDS: the committed op-stream artifacts
+#     (analysis/mod_add_qq_ops.json, analysis/mod_fast_ops.json) are byte-identical
+#     to a fresh emit of the real builder. So the committed artifact always IS the
+#     emitter's output.
+#   - this nightly job PROVES those committed artifacts satisfy the modular-arithmetic
+#     contracts (functional, register-clean, phase-clean over all measurement
+#     outcomes). Together they close the loop: if an emitter change lands that keeps
+#     the drift guard green but breaks correctness, this job goes red.
+#
+# Pure Python + z3 (consumes the committed artifacts); no Rust build needed.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC daily
+  workflow_dispatch:
+
+concurrency:
+  group: heavy-proofs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  emitted-proofs:
+    name: emitter-bound z3 proofs (heavy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      # Same locked, hash-pinned analysis env as the per-PR verify job.
+      - name: Install uv (pinned)
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.17"
+          enable-cache: true
+      - name: Sync the locked analysis env (z3, hash-verified; Python 3.11 floor)
+        run: uv sync --locked
+      - name: Install just (task runner)
+        uses: extractions/setup-just@v2
+      - name: Solinas reduction over the emitted mod_add_qq gates (ADR 0031)
+        run: uv run just solinas-emitted
+      - name: Scored _fast modular wrappers over the emitted gates (ADR 0032)
+        run: uv run just mod-fast-emitted

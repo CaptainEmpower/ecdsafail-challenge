@@ -40,7 +40,7 @@ import os
 import sys
 import time
 
-from z3 import Bool, BoolVal
+from z3 import Bool, BoolVal, Or
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -51,12 +51,11 @@ from proof_toolkit import (  # noqa: E402
     const_bits,
     load_streams,
     mod_add,
-    mod_double_canonical,
-    mod_reduce_once,
     mod_sub,
     prove,
     replay,
     require_proved,
+    sub_bits,
     ult,
 )
 
@@ -125,13 +124,19 @@ def prove_double(stream):
     p_bits = const_bits(P, n)
     assumptions = [ult(v_in, p_bits)]
 
-    # Lazy contract: v' ≡ 2v (mod p) and v' < 2^n. `mod_double_inplace_fast` folds
-    # only once, so v' may be the canonical `(2v) mod p` OR that + p. Reducing v'
-    # canonically (one conditional −p) must then equal the canonical reference — a
-    # single 256-bit equality (much lighter for z3 than an `x ∈ {r, r+p}` disjunction).
-    r = mod_double_canonical(v_in, P)
+    # Lazy contract: `mod_double_inplace_fast` folds only once, so exactly
+    #   v' = 2·v            (ovf=0)   or   v' = 2·v − p            (ovf=1).
+    # Equivalently `2·v − v' ∈ {0, p}`. State it that way rather than reducing v'
+    # canonically: `2·v` is a shallow left-shift (no modular reduction) and the two
+    # RHS options are *constants*, so z3 compares one (n+1)-bit difference against
+    # {0, p} — far lighter than an equality between two nested modular reductions
+    # (which timed out). `2·v ∈ [0, 2p) ⊆ [0, 2^{n+1})` and `v' < 2^n`, so the
+    # difference is exact and non-negative.
+    two_v = [BoolVal(False)] + v_in  # (n+1)-bit exact doubling of v (little-endian)
     v_out = [st.q(v_ids[i]) for i in range(n)]
-    congruent = bits_eq(mod_reduce_once(v_out, P), r)
+    v_out_ext = v_out + [BoolVal(False)]
+    diff, _ = sub_bits(two_v, v_out_ext)
+    congruent = Or(bits_eq(diff, const_bits(0, n + 1)), bits_eq(diff, const_bits(P, n + 1)))
 
     ancilla = [q for q in st.qubits if q not in v_ids]
     groups = [

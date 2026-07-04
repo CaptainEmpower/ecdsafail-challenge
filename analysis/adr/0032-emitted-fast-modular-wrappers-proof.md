@@ -1,12 +1,11 @@
 # ADR 0032 — Prove the scored `_fast` modular wrappers over the emitted gates (referee F2)
 
-**Status:** Proposed — implementation complete in
-`analysis/verify/mod_fast_reduction_emitted.py` (z3, via `proof_toolkit`) over the
-emitted op-streams dumped by `src/point_add/modfast_dump.rs` (`#[cfg(test)]`) into
-`analysis/mod_fast_ops.json`, wired as `just mod-fast-emitted`. The deterministic parts
-(drift guard, `refspec`, toolkit self-test) pass; the heavy 256-bit z3 proofs (`add`,
-`sub`, `double`) are being discharged — this ADR flips to **Accepted** with timings once
-they complete. Extends ADR 0031 from the plain `mod_add_qq` to the `_fast` wrappers the
+**Status:** Accepted — implemented in `analysis/verify/mod_fast_reduction_emitted.py`
+(z3, via `proof_toolkit`) over the emitted op-streams dumped by
+`src/point_add/modfast_dump.rs` (`#[cfg(test)]`) into `analysis/mod_fast_ops.json`, wired
+as `just mod-fast-emitted` and run by the nightly `heavy-proofs` workflow. All three
+wrappers (`add`, `sub`, `double`) are proved `unsat` on the negated claims (timings under
+*As built*). Extends ADR 0031 from the plain `mod_add_qq` to the `_fast` wrappers the
 **scored hot path** actually runs. Analysis-layer only; the scored circuit is
 byte-identical (`ops.bin` SHA `f30d8365…`).
 **Date:** 2026-07-04
@@ -65,12 +64,28 @@ symbolic proof is for; it is disclosed, not papered over.
 
 ## As built
 
-`just mod-fast-emitted` (or `… mod-fast-emitted add|sub|double` to run one). Heavy
-256-bit HMR-carrying replays — kept **out** of the default `just analysis` (like
-`solinas-emitted` / `kani`); run explicitly. z3 discharges each `unsat` on the negated
-claims. The Rust drift guard runs in the normal `cargo test` job.
+`just mod-fast-emitted` (or `… mod-fast-emitted add|sub|double` to run one). Each claim
+group (functional / a-preserved / ancilla-clean / phase) is discharged in its **own** z3
+solve — the phase clause over ~10³ free HMR outcomes then never has to interact with the
+functional clause. All groups return `unsat` on their negation. Timings (single core):
 
-<!-- TIMINGS: add ≈ __, sub ≈ __, double ≈ __ (filled from the runs) -->
+| op | functional | preserved | clean | phase (outcomes) |
+|----|-----------|-----------|-------|------------------|
+| `add`    | 161.5 s | 16.8 s | 0.0 s | 32.2 s (∀ 2569) |
+| `sub`    | 92.1 s  | 38.3 s | 0.1 s | 40.3 s (∀ 3330) |
+| `double` | 1.3 s (congruence) | — | 0.0 s | 0.2 s (∀ 768) |
+
+≈ 6.5 min end-to-end. Two things made it tractable (both reusable): (1) `proof_toolkit`
+emits `SWAP` as the closed-form exchange `(a,b) := If(cond,(b,a),(a,b))` instead of the
+nested 3-XOR sweep — algebraically identical to `sim.rs`, but `double`'s 256-swap rotation
+stays a permutation of inputs rather than a depth-256 XOR tree, taking `double` from
+13+ min (never finishing) to ~1 s; (2) `double`'s functional claim is stated as
+`2·v − v' ∈ {0, p}` (a shallow shift minus the output, compared against two *constants*)
+rather than an equality between two nested modular reductions.
+
+Kept **out** of the default `just analysis` (like `solinas-emitted` / `kani`); run
+explicitly, and continuously by the nightly `heavy-proofs` GitHub workflow. The Rust drift
+guard binding the artifact to the emitter runs in the normal `cargo test` job.
 
 ## Consequences
 
