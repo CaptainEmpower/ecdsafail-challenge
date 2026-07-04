@@ -24,6 +24,7 @@ from .refspec import (
     const_bits,
     mod_add,
     mod_double_canonical,
+    mod_reduce_once,
     mod_sub,
     sub_bits,
     ult,
@@ -63,4 +64,5 @@ __all__ = [
     "mod_add",
     "mod_sub",
     "mod_double_canonical",
+    "mod_reduce_once",
 ]

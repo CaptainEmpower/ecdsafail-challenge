@@ -88,6 +88,20 @@ def mod_double_canonical(x: list, p: int) -> list:
     return mod_add(x, x, p)
 
 
+def mod_reduce_once(x: list, p: int) -> list:
+    """Canonical rep of `x ∈ [0, 2^n)` under a single conditional subtract of `p`.
+
+    Returns `x` if `x < p` else `x − p`. Correct (lands in `[0, p)`) when `x < 2p`,
+    which holds for any `x < 2^n` given `p > 2^{n-1}` (as for secp256k1). Lets a claim
+    compare a possibly-unreduced output against a canonical reference with a single
+    equality instead of an `x ∈ {r, r+p}` disjunction."""
+    n = len(x)
+    p_bits = const_bits(p, n)
+    x_lt_p = ult(x, p_bits)
+    x_minus_p, _ = sub_bits(x, p_bits)
+    return [If(x_lt_p, x[i], x_minus_p[i]) for i in range(n)]
+
+
 __all__ = [
     "const_bits",
     "add_bits",
@@ -97,4 +111,5 @@ __all__ = [
     "mod_add",
     "mod_sub",
     "mod_double_canonical",
+    "mod_reduce_once",
 ]

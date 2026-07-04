@@ -40,17 +40,17 @@ import os
 import sys
 import time
 
-from z3 import And, Bool, BoolVal, Not, Or
+from z3 import Bool, BoolVal
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from proof_toolkit import (  # noqa: E402
-    add_bits,
     bits_eq,
     const_bits,
     load_streams,
     mod_add,
     mod_double_canonical,
+    mod_reduce_once,
     mod_sub,
     replay,
     require_proved,
@@ -111,12 +111,13 @@ def prove_double(stream):
     p_bits = const_bits(P, n)
     assumptions = [ult(v_in, p_bits)]
 
-    # Lazy contract: v' ≡ 2v (mod p) and v' < 2^n, i.e. v' ∈ {r, r+p} where
-    # r = canonical (2v) mod p (and r+p only when it fits in n bits).
+    # Lazy contract: v' ≡ 2v (mod p) and v' < 2^n. `mod_double_inplace_fast` folds
+    # only once, so v' may be the canonical `(2v) mod p` OR that + p. Reducing v'
+    # canonically (one conditional −p) must then equal the canonical reference — a
+    # single 256-bit equality (much lighter for z3 than an `x ∈ {r, r+p}` disjunction).
     r = mod_double_canonical(v_in, P)
-    r_plus_p, carry = add_bits(r, p_bits)
     v_out = [st.q(v_ids[i]) for i in range(n)]
-    congruent = Or(bits_eq(v_out, r), And(Not(carry), bits_eq(v_out, r_plus_p)))
+    congruent = bits_eq(mod_reduce_once(v_out, P), r)
 
     ancilla = [q for q in st.qubits if q not in v_ids]
     groups = [
