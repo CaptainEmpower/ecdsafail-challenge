@@ -90,7 +90,7 @@ def _prove_groups(op, groups, assumptions):
             verdict = "ok"
         else:
             res = prove(claims, assumptions, timeout_ms=int(_TIMEOUT_MS))
-            verdict = {unsat: "ok"}.get(res, f"UNPROVED[{res}]")
+            verdict = "ok" if res == unsat else f"UNPROVED[{res}]"
         print(f"    [{verdict}] {op}:{label:<11} ({time.perf_counter() - t0:6.1f}s)", flush=True)
 
 
