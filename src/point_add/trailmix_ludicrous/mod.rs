@@ -20,6 +20,8 @@ mod gcd;
 mod gidney;
 mod mcx;
 pub mod schedule;
+#[cfg(test)]
+mod scored_add_dump;
 mod square;
 
 pub use schedule::PAD;
