@@ -74,6 +74,19 @@ completeness-verified without giving up competitiveness. That is a reproducibili
 trust contribution to the sub-discipline — real, but narrow, and deliberately framed
 that way rather than as a frontier claim.
 
+> **Scored circuit vs. reference primitives ([ADR 0035](adr/0035-proof-scope-scored-vs-reference.md)).**
+> Sharper than the framing above: the scored `ops.bin` is built by
+> `trailmix_ludicrous` (its own `hybrid_add_adaptive` adder, `compare_geq_cin_middle`,
+> Kaliski inverse) — it does **not** emit `cuccaro_add_fast` / `mod_*_qq_fast`. Those are
+> a retained *reusable reference* arithmetic layer (`arith/modular/*_fast`), and the
+> emitter-bound proofs (ADR 0027/0030/0031/0032) bind **them**, not the scored gates. What
+> binds the **scored** circuit is (a) the constprop soundness proof (ADR 0033), applied to
+> the scored op-stream (`constprop::run`, 512-var universe), and (b) the 9024-shot sampled
+> end-to-end check. The scored circuit's own adder/comparator *could* be emitter-bound with
+> the same toolkit (tractable, not yet done); its Kaliski inverse / squaring / full
+> composition stay intractable and sampled. No proof is retracted — every emitter-bound
+> claim holds of the primitive it names; ADR 0035 just states which primitive that is.
+
 ---
 
 ## 1. Formal correctness (was: empirical only)

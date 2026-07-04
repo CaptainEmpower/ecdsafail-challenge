@@ -17,6 +17,43 @@ external referee review `paper/REVIEW.md`.
   factors are heavily hand-tuned. High effort, uncertain payoff. Editable path:
   `src/point_add/` only, `ops.bin` re-scored per change.
 
+#### Score-optimization leads surfaced by the verification arc
+Reading each primitive's exact gate structure to prove it (ADR 0027–0033) turned up
+four leads. None is a proven win — the circuit is already heavily hand-tuned — but each
+is a concrete, de-riskable experiment (the `proof_toolkit` can prove any rewrite
+equivalent over all inputs/outcomes before it is trusted). Score is
+`round(avg_toffoli) × qubits`, so watch **both** axes.
+- [x] **Measurement-based flag uncompute for `mod_*_qq_fast`** (lead #1) —
+  [#77](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/77),
+  ADR 0034. **Measured — negative, and reframed.** Building + scoring with
+  `MOD_FAST_FLAG_CONDITIONAL_REPLAY=1` gives a **byte-identical `ops.bin`**
+  (`f30d8365…`, score unchanged at 1,571,592,960): the scored circuit is built by
+  `trailmix_ludicrous`, which does **not** use `mod_*_qq_fast` (nor `cuccaro_add_fast` /
+  `mod_add_qq`) at all — its arithmetic is `trailmix_ludicrous/{arith,gidney,comparator,
+  gcd}.rs`. So this lever is dead on the scored path; the real reduction/compare Toffoli
+  to target lives in `comparator::compare_geq_cin_middle` + `arith.rs`. (The proof toolkit
+  earned its keep as a fast falsifier: one build+score pair killed the lead with no code
+  change.) *Retargeted:* apply a flag/reduction optimization inside `trailmix_ludicrous`.
+- [ ] **Lazy / deferred modular reduction** (lead #2). ADR 0032 proved
+  `mod_double_inplace_fast` leaves results in `[p, 2ⁿ)` on a ~2³¹ window, harmlessly —
+  direct evidence the pipeline tolerates non-canonical representatives. If additions
+  could defer reduction (delayed-carry, reduce periodically) the whole flag lifecycle
+  disappears for those ops. **High ceiling, high risk:** the accumulator grows (qubits ↑,
+  which the score multiplies), and exceptional-case handling depends on exact
+  representatives — needs the completeness analysis (ADR 0016/0018) re-run.
+- [ ] **More precise (still sound) constprop** (lead #3). ADR 0033 proved the affine
+  tracker never makes a false equality claim, but it is deliberately conservative
+  (collapses to a fresh variable on any non-linear CCX / maybe-false condition). A more
+  precise sound domain (a few degree-2 relations, or condition-awareness) would fold/drop
+  more CCX → fewer Toffoli, with the soundness proof as a re-runnable safety net. Also:
+  investigate *why* the emitter produces the redundant always-equal/complementary controls
+  constprop removes — avoiding them at emission is structurally cheaper than folding.
+- [ ] **`proof_toolkit` as a safe-optimization harness** (lead #4, meta). The replayer
+  proves a proposed rewrite semantically equivalent over all inputs and all measurement
+  outcomes — turning "hand-tune + hope the 9024-shot sample catches regressions" into
+  "rewrite + prove". This is what makes leads #1–#3 attemptable; no issue, it is the
+  method for the others.
+
 ### Code health
 - [ ] **Split `point_add` files into SRP modules of ≤300 LOC** —
   [#10](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/10).
@@ -26,6 +63,17 @@ external referee review `paper/REVIEW.md`.
 ### Analysis / rigor — remaining honest stretches
 These are the gaps the analysis layer still names as open. None is load-bearing
 for a current claim; each is an optional strengthening.
+- [ ] **Emitter-bind the *scored* `trailmix_ludicrous` primitives** — ADR 0035.
+  The emitter-bound proofs (ADR 0027/0030/0031/0032) bind the reusable *reference*
+  arithmetic (`arith/modular/*_fast`), which `build()` does not emit; the scored
+  `ops.bin` is `trailmix_ludicrous` (its own `hybrid_add_adaptive` adder,
+  `compare_geq_cin_middle`, Kaliski inverse). What already binds the scored circuit
+  is the constprop soundness proof (ADR 0033, run on the scored op-stream) + the
+  9024-shot sample. **Tractable next step:** dump + replay trailmix's own adder and
+  comparator through `proof_toolkit` (adder/comparator-sized, z3-tractable at 256),
+  upgrading "proved a reference sibling" to "proved the scored circuit's core
+  arithmetic primitives". The Kaliski inverse / squaring at 256 and the full
+  composition remain intractable (sampled) — same wall as the bullet below.
 - [ ] **Symbolic proof of the *composed* point-add end-to-end.** The z3/Kani
   layer proves the algebraic lemmas each optimization depends on, and ADR 0027
   now proves the emitted `_fast` adder's measurement-based uncompute — but not a

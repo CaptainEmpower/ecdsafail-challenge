@@ -121,7 +121,12 @@ whole value is faithfulness to `sim.rs`.
 
 - **Not the scored primitives.** No Cuccaro/Kaliski/Solinas *gates* live here; those stay
   in `src/point_add/`, byte-identical (ADR 0028). The toolkit only *reads* their emitted
-  output.
+  output. **Scope caveat ([ADR 0035](../../adr/0035-proof-scope-scored-vs-reference.md)):**
+  the primitives the current consumers dump (`cuccaro_add_fast`, `mod_*_qq_fast`) are the
+  *reusable reference* arithmetic in `arith/modular/`; the **scored** `ops.bin` is built by
+  `trailmix_ludicrous` and does not emit them. The replay proofs bind those reference
+  primitives; redirecting the toolkit at `trailmix_ludicrous`'s own adder/comparator (to
+  bind *scored* gates) is a tractable, not-yet-done next step.
 - **Not a general quantum simulator.** It models exactly `sim.rs`'s stabilizer-ish
   per-op semantics (X/CX/CCX/phase/measurement over one classical shot), which is all the
   scored circuit uses — not arbitrary amplitudes.
