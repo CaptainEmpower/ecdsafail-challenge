@@ -37,12 +37,19 @@ Recipes live in the repo-root [`justfile`](../justfile) (`just` — the command
 runner — replaces the old `analysis/run.sh`):
 
 ```bash
-uv sync --locked      # build the locked analysis env (z3, Python 3.11 floor)
-uv run just analysis  # z3 proofs + cost model, 14 stages, on the locked venv
-uv run just depth     # measure depth -> depth.json (needs ops.bin)
-uv run just kani      # Kani proofs on real Rust types (needs cargo kani)
-just                  # list every recipe
+uv sync --locked          # build the locked analysis env (z3, Python 3.11 floor)
+uv run just analysis      # z3 proofs + cost model, 14 stages, on the locked venv
+uv run just depth         # measure depth -> depth.json (needs ops.bin)
+uv run just kani          # Kani proofs on real Rust types (needs cargo kani)
+uv run just solinas-emitted   # heavy: Solinas reduction over emitted gates (ADR 0031)
+uv run just mod-fast-emitted  # heavy: scored _fast wrappers over emitted gates (ADR 0032)
+just                      # list every recipe
 ```
+
+The two `*-emitted` proofs are **heavy** (256-bit emitted-gate replays, minutes each) and
+kept out of `just analysis`; they run continuously in the **nightly `heavy-proofs` GitHub
+workflow** (`.github/workflows/heavy-proofs.yml`), while the per-PR CI stays fast and the
+`cargo test` drift guards keep the committed op-stream artifacts emitter-identical.
 
 The Python env is **managed by uv** ([`../pyproject.toml`](../pyproject.toml) +
 [`../uv.lock`](../uv.lock), transitively hash-pinned — the same reproducibility the
