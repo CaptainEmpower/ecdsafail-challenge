@@ -85,6 +85,8 @@ mod mbuc_kani;
 #[cfg(test)]
 mod modadd_dump;
 #[cfg(test)]
+mod modfast_dump;
+#[cfg(test)]
 mod qaddend_testbed;
 #[cfg(test)]
 mod toy_field;
