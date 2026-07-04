@@ -91,11 +91,19 @@ def mod_double_canonical(x: list, p: int) -> list:
 def mod_reduce_once(x: list, p: int) -> list:
     """Canonical rep of `x ∈ [0, 2^n)` under a single conditional subtract of `p`.
 
-    Returns `x` if `x < p` else `x − p`. Correct (lands in `[0, p)`) when `x < 2p`,
-    which holds for any `x < 2^n` given `p > 2^{n-1}` (as for secp256k1). Lets a claim
-    compare a possibly-unreduced output against a canonical reference with a single
-    equality instead of an `x ∈ {r, r+p}` disjunction."""
+    Returns `x` if `x < p` else `x − p`. A single subtract canonicalizes only when
+    `x < 2p` for every `x < 2^n`, i.e. `p >= 2^{n-1}` — true for secp256k1 at n=256, but
+    not for an arbitrary small modulus. The precondition is enforced (not just
+    documented) so misuse with a smaller `p`/width fails loudly instead of silently
+    returning a non-canonical result. Lets a claim compare a possibly-unreduced output
+    against a canonical reference with a single equality instead of an `x ∈ {r, r+p}`
+    disjunction."""
     n = len(x)
+    if p < (1 << (n - 1)) or p >= (1 << n):
+        raise ValueError(
+            f"mod_reduce_once needs 2^(n-1) <= p < 2^n for a single subtract to "
+            f"canonicalize (n={n}, p={p}); use a full reduction otherwise"
+        )
     p_bits = const_bits(p, n)
     x_lt_p = ult(x, p_bits)
     x_minus_p, _ = sub_bits(x, p_bits)

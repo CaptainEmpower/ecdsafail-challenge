@@ -9,10 +9,12 @@
 //! carry HMR/`CZ` ops and free measurement outcomes — the reduction is proved
 //! phase-clean *in context*, not just the adder in isolation.
 //!
-//! Emitted with the **default builder configuration** (no `SECP_DIRECT_CONST_ARITH` /
-//! `KAL_VENT_*` / `MOD_FAST_*` env vars) — the exact configuration `build_circuit`
-//! uses, so the proof covers the scored gates. Emitting from the real [`B`] builder is
-//! the drift guard.
+//! Emitted with the **default builder configuration** — the exact configuration
+//! `build_circuit` uses, so the proof covers the scored gates. Because the `_fast`
+//! wrappers branch on process env vars ([`CONFIG_ENV_VARS`]), the emit is wrapped in a
+//! [`DefaultConfigEnv`] guard that clears those vars (and restores them on drop), so an
+//! ambient env var can neither make the drift guard fail spuriously nor regenerate a
+//! non-scored artifact. Emitting from the real [`B`] builder is the drift guard.
 //!
 //! `#[cfg(test)]` only; never compiled into the scored circuit (`ops.bin` unchanged).
 //! Regenerate:
@@ -141,9 +143,63 @@ fn double_json() -> String {
 /// workspace root).
 const ARTIFACT: &str = "analysis/mod_fast_ops.json";
 
-/// Build the full JSON string deterministically from the real emitter. Single source
-/// of truth for both the regenerate and the drift-guard tests.
+/// Env vars that toggle emission paths in the `_fast` wrappers / doubling (venting,
+/// direct-constant arithmetic, alternative flag-uncompute, carry-truncation). The
+/// scored build (`build_circuit`) sets none of these; the dump must emit under that
+/// default regardless of the ambient environment, so [`DefaultConfigEnv`] clears them.
+const CONFIG_ENV_VARS: &[&str] = &[
+    "SECP_DIRECT_CONST_ARITH", // add/sub: direct-constant const-add path
+    "KAL_VENT_MODADD",         // add/sub: vented const correction
+    "MOD_FAST_FLAG_CONDITIONAL_REPLAY", // add/sub: measurement flag-uncompute variant
+    "KAL_DIRECT_CONST_WALKS",  // double: direct_const_walks_enabled()
+    "KAL_VENT_DOUBLE",         // double: vented ciadd
+    "KAL_DIRECT_CONST_DOUBLE", // double: direct-constant cadd
+    "KAL_DOUBLE_CARRY_TRUNC_W", // double: carry-tail-truncated add window
+];
+
+/// Serializes env mutation across parallel `cargo test` threads (the default-env
+/// toggles are process-global). Poison-tolerant: only mutual exclusion is needed.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// RAII: clear every [`CONFIG_ENV_VARS`] entry for its lifetime (saving the prior
+/// value) and restore on drop, so the emit runs under the scored/default config no
+/// matter what the ambient environment holds. Holds [`ENV_LOCK`] for the duration.
+struct DefaultConfigEnv {
+    saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl DefaultConfigEnv {
+    fn enter() -> Self {
+        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let saved = CONFIG_ENV_VARS
+            .iter()
+            .map(|&k| {
+                let prior = std::env::var_os(k);
+                std::env::remove_var(k);
+                (k, prior)
+            })
+            .collect();
+        Self { saved, _lock: lock }
+    }
+}
+
+impl Drop for DefaultConfigEnv {
+    fn drop(&mut self) {
+        for (k, v) in &self.saved {
+            match v {
+                Some(val) => std::env::set_var(k, val),
+                None => std::env::remove_var(k),
+            }
+        }
+    }
+}
+
+/// Build the full JSON string deterministically from the real emitter under the
+/// default/scored config. Single source of truth for both the regenerate and the
+/// drift-guard tests.
 fn build_json() -> String {
+    let _env = DefaultConfigEnv::enter();
     format!(
         "{{\"_comment\":\"Emitted _fast modular wrapper op-streams (default config, \
          secp256k1, n=256): mod_add_qq_fast / mod_sub_qq_fast / mod_double_inplace_fast. \
