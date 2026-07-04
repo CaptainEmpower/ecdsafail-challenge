@@ -1,7 +1,7 @@
 # ADR 0033 — Prove the constant-propagation peephole's soundness premise
 
 **Status:** Accepted — the affine-domain soundness lemmas are proved in
-`analysis/verify/peephole_identities.py` (z3, `38/38`), and the real `xor_set` is bound
+`analysis/verify/peephole_identities.py` (z3, `49/49`), and the real `xor_set` is bound
 to symmetric-difference-over-canonical-form by an exhaustive `#[cfg(test)]` test in
 `src/point_add/trailmix_ludicrous/constprop.rs` (runs in `cargo test`/CI). Retires the
 last *argued-and-sampled* premise in a **score-affecting** optimization.
@@ -30,15 +30,28 @@ sampling — the one such premise left on a transform that changes `ops.bin`.
 Discharge the premise with a two-layer proof, matching the repo's z3 + real-code pattern.
 
 **1. The affine domain is sound (z3, `peephole_identities.py`).** Model an affine form as
-`(char-vector p, const c)` and prove, universally over all forms and basis states
-`x` (widths N ∈ {4,8,16}):
+`(char-vector p, const c)`, `eval(p,c;x) = c ⊕ ⊕_i (p_i ∧ x_i)`, and prove universally
+over all forms and basis states `x`:
 
 - **XOR-linearity** — `eval(p_t ⊕ p_c, c_t ⊕ c_c; x) == eval(p_t,c_t;x) ⊕ eval(p_c,c_c;x)`:
   the `xor_set`/`cst ^=` transfer used by `CX` and the equal-control fold is GF(2)-linear
   on `eval`, so the maintained invariant *concrete = eval* is preserved by those gates.
+  Because `eval` sums over independent positions, linearity reduces to the **per-position
+  atom** `(a ⊕ b) ∧ x == (a ∧ x) ⊕ (b ∧ x)` (1-bit) — which is proved directly, so
+  linearity holds at **every** width N; the concrete char-vector widths (4/8/16/64)
+  exercise the full `eval`. (A direct width-512 linearity solve is z3-pathological —
+  parity of an AND of two symbolic 512-bit vectors, ~25 s already at 256 — and the atom
+  proves the same fact width-independently.)
 - **FoldEqualCtrls premise** — `set(a)==set(b) ∧ cst(a)==cst(b) ⇒ a==b` on every `x`.
 - **DropComplementCtrls premise** — `set(a)==set(b) ∧ cst(a)≠cst(b) ⇒ a==¬b` (so `a&b=0`).
 - **DropZeroCtrl premise** — an empty set ⇒ the qubit is the constant `c`.
+
+The equal/complement/constant premises reference the affine forms directly (their parity
+terms cancel by congruence), so they are cheap even at the **production 512-variable
+universe** — `constprop` seeds one fresh variable per input qubit, and `trailmix_ludicrous`
+feeds it reg0+reg1 = 2×256 = 512 input qubits (a single form's set is capped at
+`CAP_SET=2048`). They are proved at widths 4/8/16/64/**256**/**512**, matching the
+referee-F3 "prove at the production width" standard used for the adder/comparator.
 
 These say: *given* that two qubits carry the same (resp. complementary / empty) affine
 form, their concrete values are equal (resp. opposite / constant) on all inputs — exactly
@@ -62,7 +75,7 @@ a sound over-approximation that asserts no relation).
 
 ## As built
 
-`just peephole` now reports `38/38` lemmas (was 26 + the 12 affine-soundness lemmas);
+`just peephole` now reports `49/49` lemmas (was 26 + 23 affine-soundness lemmas), ≈1.9 s total;
 `cargo test` runs `constprop::affine_soundness::xor_set_is_symmetric_difference_and_canonical`
 (65 536 subset pairs, <0.1 s). Both are in the standard per-PR CI — no new heavy stage.
 

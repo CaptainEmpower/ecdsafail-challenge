@@ -162,6 +162,21 @@ def _affine_eval(p, c, x, n):
     return c ^ par
 
 
+def prove_affine_atom():
+    """The per-POSITION core of XOR-linearity: `(a⊕b)∧x == (a∧x)⊕(b∧x)` on single bits.
+
+    `eval` is `c ⊕ ⊕_i (p_i ∧ x_i)` — a sum over independent positions — so its
+    XOR-linearity decomposes position-by-position into exactly this 1-bit distributive
+    identity. Proving it here establishes linearity at **every** width N (incl. the
+    production 512-variable universe) without a width-512 solve, which is z3-pathological
+    (parity of an AND of two symbolic wide vectors); the concrete `prove_affine_linearity`
+    widths below then exercise the full char-vector `eval`."""
+    def setup(s):
+        a, b, x = BitVec("atoma", 1), BitVec("atomb", 1), BitVec("atomx", 1)
+        s.add(((a ^ b) & x) != ((a & x) ^ (b & x)))
+    return prove("affine per-position atom: (a⊕b)∧x==(a∧x)⊕(b∧x) ⇒ XOR-linearity ∀N", setup)
+
+
 def prove_affine_linearity(n):
     """CX / equal-fold transfer: eval of the xor_set-combined form is the XOR of the
     two forms' evals — i.e. `xor_set` (symmetric difference) is GF(2)-linear on eval."""
@@ -202,8 +217,21 @@ def prove_affine_constant(n):
     return prove(f"DropZeroCtrl premise: empty set ⇒ constant, N={n}", setup)
 
 
-for n in (4, 8, 16):
+# XOR-linearity: the width-independent per-position atom (⇒ all N) plus concrete
+# char-vector widths. A direct width-512 eval-linearity solve is z3-pathological
+# (parity of an AND of two symbolic 512-bit vectors, ~25 s already at 256), and the atom
+# proves the same fact for every N, so it is not needed.
+prove_affine_atom()
+for n in (4, 8, 16, 64):
     prove_affine_linearity(n)
+
+# Equal / complement / constant reference the affine forms directly, so the parity terms
+# cancel by congruence and these are cheap even at the PRODUCTION variable universe:
+# `constprop` seeds one fresh var per input qubit, and `trailmix_ludicrous` feeds it
+# reg0+reg1 = 2×256 = **512** input qubits (a single form's set is capped at CAP_SET=2048).
+# Prove them there, not just at small N (matching the referee-F3 "prove at the production
+# width" standard used for the adder/comparator above).
+for n in (4, 8, 16, 64, 256, 512):
     prove_affine_equal(n)
     prove_affine_complement(n)
     prove_affine_constant(n)
