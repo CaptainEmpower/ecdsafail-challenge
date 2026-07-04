@@ -44,6 +44,8 @@ from z3 import Bool, BoolVal
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from z3 import unsat  # noqa: E402
+
 from proof_toolkit import (  # noqa: E402
     bits_eq,
     const_bits,
@@ -52,10 +54,17 @@ from proof_toolkit import (  # noqa: E402
     mod_double_canonical,
     mod_reduce_once,
     mod_sub,
+    prove,
     replay,
     require_proved,
     ult,
 )
+
+# Optional per-group z3 timeout (ms). When set, groups are checked with a bound and
+# the result (proved / unknown-timeout / counterexample) is reported without aborting
+# — a diagnostic for these heavy 256-bit replays. Unset ⇒ prove unbounded (raise on
+# failure), the normal mode.
+_TIMEOUT_MS = os.environ.get("PROOF_TIMEOUT_MS")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPS_JSON = os.path.join(HERE, os.pardir, "mod_fast_ops.json")
@@ -76,8 +85,13 @@ def _prove_groups(op, groups, assumptions):
     per-group progress on these heavy 256-bit replays."""
     for label, claims in groups:
         t0 = time.perf_counter()
-        require_proved(claims, f"{op}:{label}", assumptions)
-        print(f"    [ok] {op}:{label:<11} ({time.perf_counter() - t0:6.1f}s)", flush=True)
+        if _TIMEOUT_MS is None:
+            require_proved(claims, f"{op}:{label}", assumptions)
+            verdict = "ok"
+        else:
+            res = prove(claims, assumptions, timeout_ms=int(_TIMEOUT_MS))
+            verdict = {unsat: "ok"}.get(res, f"UNPROVED[{res}]")
+        print(f"    [{verdict}] {op}:{label:<11} ({time.perf_counter() - t0:6.1f}s)", flush=True)
 
 
 def prove_add_or_sub(stream, subtract):
