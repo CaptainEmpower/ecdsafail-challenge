@@ -10,7 +10,7 @@ nothing here can affect the circuit or the score.
 | `verify/solinas_reduction.py` | z3 proof: `mod_add_qq` computes `(acc+a) mod p` for **all** `acc,a ∈ [0,p)`, and its overflow ancilla uncomputes to \|0⟩. |
 | `verify/peephole_identities.py` | z3 proofs of the constprop CCX identities, the ripple-carry adder recurrence, and the borrow-chain comparator (22 lemmas). |
 | `verify/mbuc_phase_correction.py` | z3 proof of the **emitted `_fast` adder's measurement-based uncompute** — the HMR + `cz_if` phase correction the scored hot path runs but the plain-adder z3/Kani proofs never model (referee findings F1/F2, ADR 0027). Replays the **actually emitted** `cuccaro_add_fast` op-stream (dumped by the real `B` builder into `mbuc_fast_adder_ops.json` via `src/point_add/mbuc_dump.rs`; a `#[cfg(test)]` drift guard keeps the artifact byte-identical to a fresh emit) through a z3 model of `src/sim.rs`, with the measurement outcomes **free/∀** (not the random XOF), and proves — at widths 2..**256** — `acc'=(a+acc) mod 2^n`, `a`/`c_in`/carries clean, and **net phase 0 for every input and every measurement outcome** (the HMR kickback `carry·m` is exactly cancelled by `cz_if`'s `x·y·m`). A teeth check shows dropping the `cz_if` corrections makes the phase claim fail (sat). Drives the shared `verify/proof_toolkit/` replayer (ADR 0029). |
-| `verify/run_kani.sh` | Runs the Kani (bit-precise BMC) harnesses in `src/kani_proofs.rs` that bind to the **real Rust `alloy` U256 type** (not an abstract model). |
+| `verify/run_kani.sh` | Runs the Kani (bit-precise BMC) harnesses. `src/kani_proofs.rs` binds the Solinas contract to the **real Rust `alloy` U256 type**. `src/point_add/mbuc_kani.rs` (ADR 0030) goes further and binds to the **real emitter + real simulator**: it drives the actual `B` builder (`cuccaro_add_fast`) and `src/sim.rs`, proving functional/clean/**phase-clean** over all inputs and all measurement outcomes at small width — closing the copy↔emitter gap (referee F2) on the Rust side. Its exhaustive concrete twin (widths 2/3/4, every input and outcome) runs in the normal `cargo test` (`point_add::mbuc_kani::shadow`). |
 | `verify/kickmix_sim.py` | Independent, spec-faithful simulator for kickmix `.kmx` circuits (the source paper's format) — re-derives the semantics `src/sim.rs` implements. |
 | `verify/validate_reference_adders.py` | Fuzz-validates the **source paper's** reference in-place adders (`verify/reference_circuits/`, from arXiv:2603.28846v2) — correct output, clean/dirty ancilla restored, phase +1 — and confirms its three negative-control circuits are **rejected**. |
 | `verify/controlled_lookup.py` | Constructs and validates a self-contained **controlled** table lookup `r0 ^= ctrl ? r2[r1] : 0` (the ladder's `3·2^w` QROM primitive), in both reversible and measurement-based-uncomputation forms — the reference `table_lookup_3x3.kmx` is only an illustrative extract (issue #3). |
@@ -61,11 +61,18 @@ are hand-asserted.
 
 - **z3** (`verify/*.py`) proves the width-256 arithmetic over abstract
   bitvectors — full field coverage, fast, but a *model* of the algorithm.
-- **Kani** (`src/kani_proofs.rs`) proves the exact Rust control flow of the
-  Solinas reduction using the real `alloy_primitives::U256` type
+- **Kani** proves the exact Rust at two binding strengths. `src/kani_proofs.rs`
+  proves the Solinas reduction on the real `alloy_primitives::U256` type
   (`solinas_add_u256`, verified against the real secp256k1 prime) and a fast
-  small-width twin (`solinas_add_u64`). This binds the proof to the *implementation
-  types*, not just the math.
+  small-width twin (`solinas_add_u64`) — binding to the *implementation types*. But
+  those harnesses prove a hand-written *twin* of `mod_add_qq`; a twin can drift from
+  the gate emitter (referee F2). `src/point_add/mbuc_kani.rs` (ADR 0030) removes that
+  gap: it drives the **real `B` builder and the real `src/sim.rs`**, proving the
+  emitted `cuccaro_add_fast` functional/clean/phase-clean over all inputs and all
+  measurement outcomes — bit-precise at small width (BMC does not scale to 256; that
+  width is z3's job). z3 and this Kani harness are thus *independent* bindings of the
+  same emitted primitive: z3 replays it through a Python *model* of the simulator, Kani
+  executes the *actual* simulator.
 - The division-based `sub_mod` is **not** BMC-tractable (ruint's 256-bit `%` is
   Knuth long division with unbounded loops) — which is itself the argument for
   the division-free Solinas design. That path is covered by the z3 layer.

@@ -33,11 +33,13 @@ for a current claim; each is an optional strengthening.
   group law (does not scale in either solver). The composition into a full
   point-add stays guarded by the 9024-shot sample.
   Detail: `analysis/scientific-value.md` §1 Scope/honesty + §4.
-- [ ] **(Optional) Kani harness bound to the *emitter*, not a copy.** ADR 0027
-  closed the emitted-fast-adder *phase* gap in z3 with a drift guard; a Kani
-  harness that drives the gate-emitting builder directly (rather than the
-  hand-written integer twin `src/kani_proofs.rs` proves) would remove the last
-  copy↔emitter gap for the Solinas path. Detail: ADR 0026 (F1/F2 note),
+- [x] **(Optional) Kani harness bound to the *emitter*, not a copy.** Done —
+  ADR 0030. `src/point_add/mbuc_kani.rs` drives the real `B` builder + real
+  `Simulator` for `cuccaro_add_fast`, proving functional/clean/phase-clean over
+  all inputs and all measurement outcomes at small width (`#[kani::proof]`), with
+  an exhaustive `#[cfg(test)]` shadow at widths 2/3/4 in `cargo test`. Honest
+  scope: binds to the real emitter/types at small width — not production 256
+  (BMC-intractable; that width is the z3 layer's job, ADR 0027). Detail: ADR 0030,
   `paper/REVIEW.md` F2.
 - [ ] **Pre-submission: pin the exact source for the PA Pareto operating
   points.** The `2.7M/1175` and `2.1M/1425` point-addition numbers are used as

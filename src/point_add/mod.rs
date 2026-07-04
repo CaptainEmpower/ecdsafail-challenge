@@ -80,6 +80,8 @@ mod ladder_full;
 mod ladder_stream;
 #[cfg(test)]
 mod mbuc_dump;
+#[cfg(any(test, kani))]
+mod mbuc_kani;
 #[cfg(test)]
 mod qaddend_testbed;
 #[cfg(test)]
