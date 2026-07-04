@@ -251,14 +251,18 @@ def load_streams(path: str) -> list[OpStream]:
 
 
 # -- z3 claim helpers -------------------------------------------------------
-def prove(claims: list[BoolRef], assumptions: list[BoolRef] = ()):
+def prove(claims: list[BoolRef], assumptions: list[BoolRef] = (), timeout_ms: int = None):
     """Try to prove the conjunction of `claims` over all free vars.
 
     `assumptions` are preconditions added to the solver (e.g. `a < p`, `acc < p`);
-    the claim is then proved *under* them. Returns z3's result on the negation of
-    the claims: `unsat` means proved (no input / measurement outcome satisfying the
-    assumptions violates any claim); `sat` means a counterexample exists."""
+    the claim is then proved *under* them. `timeout_ms` bounds the z3 solve (returns
+    `unknown` on timeout instead of running unbounded). Returns z3's result on the
+    negation of the claims: `unsat` means proved (no input / measurement outcome
+    satisfying the assumptions violates any claim); `sat` means a counterexample
+    exists; `unknown` means the solver gave up (e.g. timed out)."""
     s = Solver()
+    if timeout_ms is not None:
+        s.set("timeout", int(timeout_ms))
     for a in assumptions:
         s.add(a)
     s.add(Not(And(*claims)))

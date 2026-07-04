@@ -18,6 +18,17 @@ Public API (see `symsim` for details):
   helpers (prove-over-all-inputs and the teeth direction).
 - `ripple_carry_sum` — a symbolic `(a+b) mod 2^n` reference for stating claims.
 """
+from .refspec import (
+    add_bits,
+    bits_eq,
+    const_bits,
+    mod_add,
+    mod_double_canonical,
+    mod_reduce_once,
+    mod_sub,
+    sub_bits,
+    ult,
+)
 from .symsim import (
     OpStream,
     PHASE_OP_KINDS,
@@ -44,4 +55,14 @@ __all__ = [
     "require_teeth",
     "ripple_carry_sum",
     "PHASE_OP_KINDS",
+    # refspec — independent reference arithmetic for stating claims
+    "const_bits",
+    "add_bits",
+    "sub_bits",
+    "ult",
+    "bits_eq",
+    "mod_add",
+    "mod_sub",
+    "mod_double_canonical",
+    "mod_reduce_once",
 ]

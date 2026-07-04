@@ -59,13 +59,18 @@ detail lives in the ADR trail (`analysis/adr/`, index at
   ADR 0024), plus a z3 proof of the emitted `_fast` adder's measurement-based
   uncompute ([#57](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/57),
   ADR 0027). ADR 0001–0005, 0024, 0027.
-- **Emitter-bound proofs — the copy↔emitter gap (referee F2) closed on both the
-  adder and the reduction.** The emitted `cuccaro_add_fast` adder is proved in z3
-  over its op-stream (ADR 0027) and by a Kani harness driving the real `B` builder
-  + `Simulator` (ADR 0030); the emitted `mod_add_qq` **Solinas reduction** is proved
-  in z3 over its op-stream at production 256-bit width (ADR 0031). The step-for-step
-  model (ADR 0024) and the Kani integer twin become independent cross-checks rather
-  than the sole binding. All reuse the `proof_toolkit` methodology (ADR 0028/0029).
+- **Emitter-bound proofs — the copy↔emitter gap (referee F2) closed across the
+  arithmetic core.** The emitted `cuccaro_add_fast` adder is proved in z3 over its
+  op-stream (ADR 0027) and by a Kani harness driving the real `B` builder +
+  `Simulator` (ADR 0030); the emitted `mod_add_qq` **Solinas reduction** in z3 at
+  production 256-bit width (ADR 0031); and the **scored `_fast` modular wrappers**
+  (`mod_add_qq_fast`/`mod_sub_qq_fast`/`mod_double_inplace_fast` — the 58 hot-path
+  calls) over their emitted, HMR-carrying gates (ADR 0032) — the measurement-based
+  Solinas fold verified in context. ADR 0032 also surfaced a lazy-reduction in
+  `mod_double_inplace_fast` (unreduced on a ~2³¹ input window the sampled test
+  misses; congruent mod p, harmless downstream, now disclosed). The step-for-step
+  model (ADR 0024) and the Kani integer twin become independent cross-checks. All
+  reuse the `proof_toolkit` methodology (ADR 0028/0029).
 - **Tier B — the full ECDLP ladder emitted + measured end-to-end**
   ([#4](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/4)):
   windowed QROM lookup cost measured (ADR 0010), full ladder stream-emitted and

@@ -75,6 +75,15 @@ solinas-emitted:
     @echo "### Solinas reduction over the EMITTED mod_add_qq gates (z3, ADR 0031, F2; ~5 min) ###"
     cd analysis && {{PYTHON}} verify/solinas_reduction_emitted.py
 
+# The scored hot-path `_fast` modular wrappers (mod_add_qq_fast / mod_sub_qq_fast /
+# mod_double_inplace_fast) proved over the REAL emitted gates (ADR 0032, F2). HEAVY
+# (256-bit, HMR-carrying streams); not part of `just analysis`. Pass an op to run one:
+#   just mod-fast-emitted            # all three (long)
+#   just PYTHON=python3 mod-fast-emitted  # (via uv: `uv run just mod-fast-emitted add`)
+mod-fast-emitted:
+    @echo "### Scored _fast modular wrappers over the EMITTED gates (z3, ADR 0032, F2; heavy) ###"
+    cd analysis && {{PYTHON}} verify/mod_fast_reduction_emitted.py
+
 peephole:
     @echo "### Peephole / adder / comparator proofs (z3) ###"
     cd analysis && {{PYTHON}} verify/peephole_identities.py
