@@ -136,6 +136,106 @@ def prove_cmp(w):
 for w in (1, 2, 3, 4, 8, 16, 32, 64, 256, 257):
     prove_cmp(w)
 
+
+print("\n== Affine-form analysis soundness (constprop.rs premise) ==")
+# The CCX peephole identities above are sound GIVEN a premise the analysis SUPPLIES:
+# that two controls it marks equal / complementary / constant really are so on every
+# basis state. `constprop.rs` tracks each qubit as a GF(2)-linear (affine) form over
+# "fresh" input variables — a characteristic vector `p` (which vars are XORed) plus a
+# const bit `c` — evaluating to
+#       eval(p, c; x) = c XOR (XOR_i  p_i AND x_i)
+# and combines forms with `xor_set` (symmetric difference == XOR of characteristic
+# vectors). These lemmas discharge the premise at the domain level; the REAL `xor_set`
+# is bound to "symmetric difference over a canonical (sorted, de-duped) form" by the
+# exhaustive Rust test `constprop::affine_soundness::xor_set_is_symmetric_difference_and_canonical`
+# (`cargo test`). Together: the tracker's equal/complement/constant claims hold on
+# every basis state — the premise the 26 identities assume, previously only argued
+# ("standard linearity argument") and sampled (`CONSTPROP_VERIFY`).
+
+
+def _affine_eval(p, c, x, n):
+    """c XOR parity(p & x) — evaluate an affine form (char-vector p, const c) at x."""
+    pv = p & x
+    par = ZERO
+    for i in range(n):
+        par = par ^ Extract(i, i, pv)
+    return c ^ par
+
+
+def prove_affine_atom():
+    """The per-POSITION core of XOR-linearity: `(a⊕b)∧x == (a∧x)⊕(b∧x)` on single bits.
+
+    `eval` is `c ⊕ ⊕_i (p_i ∧ x_i)` — a sum over independent positions — so its
+    XOR-linearity decomposes position-by-position into exactly this 1-bit distributive
+    identity. Proving it here establishes linearity at **every** width N (incl. the
+    production 512-variable universe) without a width-512 solve, which is z3-pathological
+    (parity of an AND of two symbolic wide vectors); the concrete `prove_affine_linearity`
+    widths below then exercise the full char-vector `eval`."""
+    def setup(s):
+        a, b, x = BitVec("atoma", 1), BitVec("atomb", 1), BitVec("atomx", 1)
+        s.add(((a ^ b) & x) != ((a & x) ^ (b & x)))
+    return prove("affine per-position atom: (a⊕b)∧x==(a∧x)⊕(b∧x) ⇒ XOR-linearity ∀N", setup)
+
+
+def prove_affine_linearity(n):
+    """CX / equal-fold transfer: eval of the xor_set-combined form is the XOR of the
+    two forms' evals — i.e. `xor_set` (symmetric difference) is GF(2)-linear on eval."""
+    def setup(s):
+        pt, pc, x = BitVec(f"lpt{n}", n), BitVec(f"lpc{n}", n), BitVec(f"lx{n}", n)
+        ct, cc = BitVec(f"lct{n}", 1), BitVec(f"lcc{n}", 1)
+        lhs = _affine_eval(pt ^ pc, ct ^ cc, x, n)
+        rhs = _affine_eval(pt, ct, x, n) ^ _affine_eval(pc, cc, x, n)
+        s.add(lhs != rhs)
+    return prove(f"affine XOR-linearity: eval(a⊕b)==eval(a)⊕eval(b), N={n}", setup)
+
+
+def prove_affine_equal(n):
+    """FoldEqualCtrls premise: equal affine forms ⇒ equal on every basis state."""
+    def setup(s):
+        pa, pb, x = BitVec(f"epa{n}", n), BitVec(f"epb{n}", n), BitVec(f"ex{n}", n)
+        ca, cb = BitVec(f"eca{n}", 1), BitVec(f"ecb{n}", 1)
+        s.add(pa == pb, ca == cb)                                  # premise the tracker checks
+        s.add(_affine_eval(pa, ca, x, n) != _affine_eval(pb, cb, x, n))
+    return prove(f"FoldEqualCtrls premise: set(a)==set(b) ∧ cst(a)==cst(b) ⇒ a==b, N={n}", setup)
+
+
+def prove_affine_complement(n):
+    """DropComplementCtrls premise: same set, differing const ⇒ a == NOT b (so a&b=0)."""
+    def setup(s):
+        pa, pb, x = BitVec(f"cpa{n}", n), BitVec(f"cpb{n}", n), BitVec(f"cx{n}", n)
+        ca, cb = BitVec(f"cca{n}", 1), BitVec(f"ccb{n}", 1)
+        s.add(pa == pb, ca != cb)
+        s.add((_affine_eval(pa, ca, x, n) ^ _affine_eval(pb, cb, x, n)) != ONE)  # a xor b == 1
+    return prove(f"DropComplementCtrls premise: set(a)==set(b) ∧ cst(a)≠cst(b) ⇒ a==¬b, N={n}", setup)
+
+
+def prove_affine_constant(n):
+    """DropZeroCtrl premise: an empty affine set ⇒ the qubit is the constant c."""
+    def setup(s):
+        c, x = BitVec(f"kc{n}", 1), BitVec(f"kx{n}", n)
+        s.add(_affine_eval(BitVecVal(0, n), c, x, n) != c)  # empty set ⇒ eval == c, ∀ x
+    return prove(f"DropZeroCtrl premise: empty set ⇒ constant, N={n}", setup)
+
+
+# XOR-linearity: the width-independent per-position atom (⇒ all N) plus concrete
+# char-vector widths. A direct width-512 eval-linearity solve is z3-pathological
+# (parity of an AND of two symbolic 512-bit vectors, ~25 s already at 256), and the atom
+# proves the same fact for every N, so it is not needed.
+prove_affine_atom()
+for n in (4, 8, 16, 64):
+    prove_affine_linearity(n)
+
+# Equal / complement / constant reference the affine forms directly, so the parity terms
+# cancel by congruence and these are cheap even at the PRODUCTION variable universe:
+# `constprop` seeds one fresh var per input qubit, and `trailmix_ludicrous` feeds it
+# reg0+reg1 = 2×256 = **512** input qubits (a single form's set is capped at CAP_SET=2048).
+# Prove them there, not just at small N (matching the referee-F3 "prove at the production
+# width" standard used for the adder/comparator above).
+for n in (4, 8, 16, 64, 256, 512):
+    prove_affine_equal(n)
+    prove_affine_complement(n)
+    prove_affine_constant(n)
+
 # ---- summary ----
 n_ok = sum(1 for _, ok, _ in results if ok)
 print(f"\n=== {n_ok}/{len(results)} lemmas PROVED (unsat on negation) ===")
