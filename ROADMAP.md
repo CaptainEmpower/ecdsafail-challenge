@@ -63,6 +63,17 @@ equivalent over all inputs/outcomes before it is trusted). Score is
 ### Analysis / rigor — remaining honest stretches
 These are the gaps the analysis layer still names as open. None is load-bearing
 for a current claim; each is an optional strengthening.
+- [ ] **Emitter-bind the *scored* `trailmix_ludicrous` primitives** — ADR 0035.
+  The emitter-bound proofs (ADR 0027/0030/0031/0032) bind the reusable *reference*
+  arithmetic (`arith/modular/*_fast`), which `build()` does not emit; the scored
+  `ops.bin` is `trailmix_ludicrous` (its own `hybrid_add_adaptive` adder,
+  `compare_geq_cin_middle`, Kaliski inverse). What already binds the scored circuit
+  is the constprop soundness proof (ADR 0033, run on the scored op-stream) + the
+  9024-shot sample. **Tractable next step:** dump + replay trailmix's own adder and
+  comparator through `proof_toolkit` (adder/comparator-sized, z3-tractable at 256),
+  upgrading "proved a reference sibling" to "proved the scored circuit's core
+  arithmetic primitives". The Kaliski inverse / squaring at 256 and the full
+  composition remain intractable (sampled) — same wall as the bullet below.
 - [ ] **Symbolic proof of the *composed* point-add end-to-end.** The z3/Kani
   layer proves the algebraic lemmas each optimization depends on, and ADR 0027
   now proves the emitted `_fast` adder's measurement-based uncompute — but not a
