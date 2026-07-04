@@ -127,9 +127,14 @@ from ≤64-bit instances (referee finding F3, [ADR 0024](adr/0024-z3-production-
 
 The affine-form analysis in `constprop.rs` (`FoldEqualCtrls`/`DropComplement`)
 proves two controls are *always* equal/opposite over GF(2); the z3 lemma
-confirms the peephole is sound *given* that premise. The premise itself — that
-GF(2) affine equality implies equality on every basis state — is the standard
-linearity argument and is what the empirical `CONSTPROP_VERIFY` pass corroborates.
+confirms the peephole is sound *given* that premise. **That premise is now proved
+too** ([ADR 0033](adr/0033-constprop-affine-soundness.md)), no longer only argued
++ sampled (`CONSTPROP_VERIFY`): `peephole_identities.py` adds the affine-domain
+soundness lemmas (XOR-linearity of `eval`; `set(a)==set(b) ∧ cst==cst ⇒ a==b`;
+`≠cst ⇒ a==¬b`; empty set ⇒ constant), and an exhaustive `#[cfg(test)]` test in
+`constprop.rs` binds the real `xor_set` to *symmetric-difference over a canonical
+(sorted, de-duped) form* — so the tracker's equal/complement/constant claims hold
+on every basis state, and `Vec`-equality of two affine sets is exactly set-equality.
 
 ### 1c. Kani bridge — binding the proof to the real Rust types
 

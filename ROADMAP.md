@@ -71,6 +71,13 @@ detail lives in the ADR trail (`analysis/adr/`, index at
   misses; congruent mod p, harmless downstream, now disclosed). The step-for-step
   model (ADR 0024) and the Kani integer twin become independent cross-checks. All
   reuse the `proof_toolkit` methodology (ADR 0028/0029).
+- **Constant-propagation peephole soundness proved (ADR 0033).** The affine-form
+  tracker's equal/complement/constant control claims — which fire the
+  Toffoli-removing folds on the *scored* circuit — were the last argued+sampled
+  premise on a score-affecting transform. Now proved: 12 affine-domain soundness
+  lemmas in `peephole_identities.py` (38/38) + an exhaustive `#[cfg(test)]` test
+  binding the real `xor_set` to symmetric-difference-over-canonical-form. Both in
+  the fast per-PR CI.
 - **Tier B — the full ECDLP ladder emitted + measured end-to-end**
   ([#4](https://github.com/CaptainEmpower/ecdsafail-challenge/issues/4)):
   windowed QROM lookup cost measured (ADR 0010), full ladder stream-emitted and

@@ -2026,3 +2026,53 @@ fn step_and_check_affine<R: sha3::digest::XofReader>(
         }
     }
 }
+
+#[cfg(test)]
+mod affine_soundness {
+    //! Bind the real [`xor_set`] to the spec the affine analysis — and its z3 lemmas
+    //! in `analysis/verify/peephole_identities.py` — assume: it computes the SYMMETRIC
+    //! DIFFERENCE of two variable-sets and preserves the CANONICAL (strictly
+    //! increasing) form. That canonical invariant is what lets the peephole use `Vec`
+    //! equality of two affine sets as set-equality (`FoldEqualCtrls` /
+    //! `DropComplementCtrls` test `af.set[a] == af.set[b]`). Proving both over the real
+    //! function turns the constprop soundness premise from argued+sampled into proven.
+    use super::xor_set;
+
+    /// Strictly increasing == sorted with no duplicates == the canonical set form.
+    fn is_canonical(set: &[u32]) -> bool {
+        set.windows(2).all(|w| w[0] < w[1])
+    }
+
+    /// The subset of `{0..u}` selected by `mask`, in canonical (increasing) order.
+    fn subset(mask: u32, u: u32) -> Vec<u32> {
+        (0..u).filter(|&i| (mask >> i) & 1 == 1).collect()
+    }
+
+    /// Exhaustive over every pair of subsets of an 8-element universe: `xor_set`
+    /// returns the symmetric difference (checked by membership on every element) and
+    /// keeps the canonical form. Eight distinct ordered ids exercise every branch of
+    /// the sorted merge, and the merge is value-agnostic (only the ordering of ids
+    /// matters), so a representative universe is exhaustive for the algorithm.
+    #[test]
+    fn xor_set_is_symmetric_difference_and_canonical() {
+        const U: u32 = 8;
+        for ma in 0..(1u32 << U) {
+            let a = subset(ma, U);
+            for mb in 0..(1u32 << U) {
+                let b = subset(mb, U);
+                let c = xor_set(&a, &b);
+                assert!(
+                    is_canonical(&c),
+                    "xor_set broke canonical form: {a:?} ^ {b:?} = {c:?}"
+                );
+                for e in 0..U {
+                    assert_eq!(
+                        c.contains(&e),
+                        a.contains(&e) ^ b.contains(&e),
+                        "membership != symmetric difference at {e}: {a:?} ^ {b:?} = {c:?}"
+                    );
+                }
+            }
+        }
+    }
+}
