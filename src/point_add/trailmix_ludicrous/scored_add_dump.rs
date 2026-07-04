@@ -11,6 +11,11 @@
 //! plain Gidney add (`k + 2√n ≥ n`) and the sqrt(n)-chunked add — at widths up to the
 //! production 256/258, so the proof covers the regimes the square schedule drives.
 //!
+//! The emit runs under a **forced default config** (all `TLM_*` toggles cleared, the
+//! comparator call-index reset — see [`TlmDefaultEnv`]), so it reproduces the scored
+//! `build_circuit` gates regardless of the ambient environment or `cargo test`
+//! ordering; ambient `TLM_*` env vars are deliberately ignored here.
+//!
 //! `#[cfg(test)]` only; never compiled into `build_circuit` (`ops.bin` unchanged).
 //! Regenerate:
 //! ```text
@@ -123,7 +128,55 @@ fn one_config_json(n: usize, k: usize) -> String {
 
 const ARTIFACT: &str = "analysis/scored_add_ops.json";
 
+/// Serializes env mutation across parallel `cargo test` threads (the `TLM_*` toggles
+/// are process-global). Poison-tolerant: only mutual exclusion is needed.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// RAII: clear every `TLM_*` env var for its lifetime (saving prior values) and
+/// restore on drop. Every `TLM_*` knob toggles a trailmix emission path (structural-
+/// dead-call skips, alternative chunkings, layout overrides, …); the scored build
+/// (`build_circuit`) sets **none** of them — its `ops.bin` is the pristine-default
+/// emission — so the dump must emit under that default regardless of the ambient
+/// environment, or the drift guard flakes / the proof binds non-scored gates. Holds
+/// [`ENV_LOCK`] for the duration (matching `modfast_dump.rs`'s `DefaultConfigEnv`).
+struct TlmDefaultEnv {
+    saved: Vec<(String, std::ffi::OsString)>,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl TlmDefaultEnv {
+    fn enter() -> Self {
+        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let saved: Vec<(String, std::ffi::OsString)> = std::env::vars_os()
+            .filter_map(|(k, v)| {
+                k.to_str()
+                    .filter(|s| s.starts_with("TLM_"))
+                    .map(|s| (s.to_owned(), v))
+            })
+            .collect();
+        for (k, _) in &saved {
+            std::env::remove_var(k);
+        }
+        Self { saved, _lock: lock }
+    }
+}
+
+impl Drop for TlmDefaultEnv {
+    fn drop(&mut self) {
+        for (k, v) in &self.saved {
+            std::env::set_var(k, v);
+        }
+    }
+}
+
+/// Build the full JSON string deterministically from the real emitter under the
+/// default/scored config: `TLM_*` toggles cleared and the comparator call-index reset
+/// (the structural-dead-call elision keys off it when those toggles are on), so the
+/// dumped gates match `build_circuit`'s regardless of ambient env or test ordering.
+/// Single source of truth for both the regenerate and the drift-guard tests.
 fn build_json() -> String {
+    let _env = TlmDefaultEnv::enter();
+    super::comparator::reset_compare_call_index();
     let bodies: Vec<String> = CONFIGS
         .iter()
         .map(|&(n, k)| one_config_json(n, k))
