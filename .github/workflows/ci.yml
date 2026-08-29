@@ -101,6 +101,7 @@ jobs:
             score.json
             depth.json
           if-no-files-found: ignore
+          retention-days: 10
 
   lint:
     name: fmt + clippy (informational)
